@@ -1,0 +1,49 @@
+{
+  "name": "WorkflowTask",
+  "type": "object",
+  "properties": {
+    "workflow_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "assigned_team": {
+      "type": "string"
+    },
+    "assigned_to": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "in_progress",
+        "done",
+        "blocked"
+      ],
+      "default": "pending"
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "default": "medium"
+    },
+    "due_in_minutes": {
+      "type": "number"
+    },
+    "completed_at": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "title"
+  ]
+}

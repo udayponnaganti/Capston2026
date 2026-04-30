@@ -1,0 +1,49 @@
+{
+  "name": "Station",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    },
+    "latitude": {
+      "type": "number"
+    },
+    "longitude": {
+      "type": "number"
+    },
+    "platforms": {
+      "type": "number"
+    },
+    "platforms_occupied": {
+      "type": "number",
+      "default": 0
+    },
+    "zone": {
+      "type": "string"
+    },
+    "connections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "station_code": {
+            "type": "string"
+          },
+          "distance_km": {
+            "type": "number"
+          },
+          "travel_time_min": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "name",
+    "code"
+  ]
+}

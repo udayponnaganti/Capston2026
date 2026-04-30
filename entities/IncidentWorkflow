@@ -1,0 +1,78 @@
+{
+  "name": "IncidentWorkflow",
+  "type": "object",
+  "properties": {
+    "alert_id": {
+      "type": "string"
+    },
+    "alert_title": {
+      "type": "string"
+    },
+    "alert_severity": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "warning",
+        "info"
+      ]
+    },
+    "alert_type": {
+      "type": "string",
+      "enum": [
+        "conflict",
+        "delay",
+        "weather",
+        "anomaly",
+        "maintenance"
+      ]
+    },
+    "train_number": {
+      "type": "string"
+    },
+    "station": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "open",
+        "in_progress",
+        "resolved",
+        "closed"
+      ],
+      "default": "open"
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "p1",
+        "p2",
+        "p3"
+      ],
+      "default": "p2"
+    },
+    "assigned_team": {
+      "type": "string",
+      "enum": [
+        "mechanical",
+        "electrical",
+        "operations",
+        "safety",
+        "it",
+        "track"
+      ]
+    },
+    "protocol": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "resolved_at": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "alert_title"
+  ]
+}

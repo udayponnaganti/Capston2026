@@ -1,0 +1,50 @@
+{
+  "name": "Alert",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "warning",
+        "info"
+      ],
+      "default": "info"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "conflict",
+        "delay",
+        "weather",
+        "anomaly",
+        "maintenance"
+      ]
+    },
+    "train_number": {
+      "type": "string"
+    },
+    "station": {
+      "type": "string"
+    },
+    "ai_suggestion": {
+      "type": "string"
+    },
+    "impact": {
+      "type": "string"
+    },
+    "resolved": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "title"
+  ]
+}

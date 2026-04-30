@@ -1,0 +1,85 @@
+{
+  "name": "Train",
+  "type": "object",
+  "properties": {
+    "train_number": {
+      "type": "string",
+      "description": "Unique train identifier"
+    },
+    "name": {
+      "type": "string",
+      "description": "Train name"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "on_time",
+        "delayed",
+        "cancelled",
+        "arrived",
+        "departed"
+      ],
+      "default": "on_time"
+    },
+    "current_station": {
+      "type": "string"
+    },
+    "next_station": {
+      "type": "string"
+    },
+    "origin": {
+      "type": "string"
+    },
+    "destination": {
+      "type": "string"
+    },
+    "latitude": {
+      "type": "number"
+    },
+    "longitude": {
+      "type": "number"
+    },
+    "speed_kmh": {
+      "type": "number"
+    },
+    "delay_minutes": {
+      "type": "number",
+      "default": 0
+    },
+    "scheduled_arrival": {
+      "type": "string"
+    },
+    "estimated_arrival": {
+      "type": "string"
+    },
+    "platform": {
+      "type": "number"
+    },
+    "route": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "passenger_count": {
+      "type": "number"
+    },
+    "capacity": {
+      "type": "number"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "express",
+        "local",
+        "freight",
+        "high_speed"
+      ],
+      "default": "express"
+    }
+  },
+  "required": [
+    "train_number",
+    "name"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "TrainLog",
+  "type": "object",
+  "properties": {
+    "train_number": {
+      "type": "string"
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "departure",
+        "arrival",
+        "delay",
+        "speed_change",
+        "reroute",
+        "stop"
+      ]
+    },
+    "station": {
+      "type": "string"
+    },
+    "details": {
+      "type": "string"
+    },
+    "delay_minutes": {
+      "type": "number"
+    },
+    "speed_kmh": {
+      "type": "number"
+    },
+    "timestamp": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "train_number",
+    "event_type"
+  ]
+}

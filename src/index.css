@@ -1,0 +1,132 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-inter: 'Inter', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+    --card: 222 41% 10%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 41% 10%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 211 100% 62%;
+    --primary-foreground: 222 47% 6%;
+    --secondary: 222 30% 16%;
+    --secondary-foreground: 210 40% 90%;
+    --muted: 222 30% 14%;
+    --muted-foreground: 215 20% 55%;
+    --accent: 161 72% 48%;
+    --accent-foreground: 222 47% 6%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 222 30% 18%;
+    --input: 222 30% 18%;
+    --ring: 211 100% 62%;
+    --chart-1: 211 100% 62%;
+    --chart-2: 161 72% 48%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 0 72% 51%;
+    --radius: 0.75rem;
+    --sidebar-background: 222 41% 8%;
+    --sidebar-foreground: 210 40% 90%;
+    --sidebar-primary: 211 100% 62%;
+    --sidebar-primary-foreground: 222 47% 6%;
+    --sidebar-accent: 222 30% 14%;
+    --sidebar-accent-foreground: 210 40% 90%;
+    --sidebar-border: 222 30% 18%;
+    --sidebar-ring: 211 100% 62%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 47% 6%;
+  }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+    --card: 222 41% 10%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 41% 10%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 211 100% 62%;
+    --primary-foreground: 222 47% 6%;
+    --secondary: 222 30% 16%;
+    --secondary-foreground: 210 40% 90%;
+    --muted: 222 30% 14%;
+    --muted-foreground: 215 20% 55%;
+    --accent: 161 72% 48%;
+    --accent-foreground: 222 47% 6%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 222 30% 18%;
+    --input: 222 30% 18%;
+    --ring: 211 100% 62%;
+    --chart-1: 211 100% 62%;
+    --chart-2: 161 72% 48%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 0 72% 51%;
+    --sidebar-background: 222 41% 8%;
+    --sidebar-foreground: 210 40% 90%;
+    --sidebar-primary: 211 100% 62%;
+    --sidebar-primary-foreground: 222 47% 6%;
+    --sidebar-accent: 222 30% 14%;
+    --sidebar-accent-foreground: 210 40% 90%;
+    --sidebar-border: 222 30% 18%;
+    --sidebar-ring: 211 100% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-inter;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(222, 41%, 8%);
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(222, 30%, 22%);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(211, 100%, 62%);
+}
+
+/* Pulse animation for live indicators */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.animate-live-pulse {
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 5px hsl(211, 100%, 62%, 0.3); }
+  50% { box-shadow: 0 0 20px hsl(211, 100%, 62%, 0.6); }
+}
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+/* Glassmorphism utility */
+.glass {
+  background: hsla(222, 41%, 10%, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid hsla(222, 30%, 22%, 0.5);
+}
