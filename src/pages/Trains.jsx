@@ -1,11 +1,19 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Search, Zap, Loader2, Wifi, WifiOff } from 'lucide-react';
 import { useRealTimeTrains } from '@/lib/useRealTimeTrains';
 import TrainStatusCard from '@/components/admin/TrainStatusCard';
 import { Button } from '@/components/ui/button';
 
 const STATUS_OPTIONS = ['all', 'on_time', 'delayed', 'cancelled', 'arrived', 'departed'];
-const TYPE_OPTIONS = ['all', 'express', 'high_speed', 'local', 'freight'];
+const TYPE_OPTIONS   = ['all', 'express', 'high_speed', 'local', 'freight'];
+const SORT_OPTIONS   = [
+  { value: 'default',    label: 'Default Order' },
+  { value: 'delay_desc', label: 'Most Delayed' },
+  { value: 'delay_asc',  label: 'Least Delayed' },
+  { value: 'speed_desc', label: 'Fastest Speed' },
+  { value: 'occ_desc',   label: 'Highest Occupancy' },
+  { value: 'status',     label: 'By Status' },
+];
 
 // ─── Local AI Analysis Engine ──────────────────────────────────────────────────
 function analyzeNetwork(trains) {
@@ -105,19 +113,54 @@ function analyzeNetwork(trains) {
 
 export default function Trains() {
   const { trains, syncStatus } = useRealTimeTrains();
-  const [search, setSearch] = useState('');
+  const [search, setSearch]         = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [typeFilter, setTypeFilter] = useState('all');
+  const [typeFilter, setTypeFilter]   = useState('all');
+  const [sortBy, setSortBy]           = useState('default');
   const [analysisOpen, setAnalysisOpen] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [aiLoading, setAiLoading]     = useState(false);
+  const [aiAnalysis, setAiAnalysis]   = useState(null);
 
-  const filtered = trains.filter(t => {
-    const matchSearch = t.name.toLowerCase().includes(search.toLowerCase()) || t.train_number.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === 'all' || t.status === statusFilter;
-    const matchType = typeFilter === 'all' || t.type === typeFilter;
-    return matchSearch && matchStatus && matchType;
-  });
+  // ── Deduplicate by train_number (API may return duplicates) ────────────────
+  const uniqueTrains = useMemo(() => {
+    const seen = new Map();
+    trains.forEach(t => {
+      if (!seen.has(t.train_number)) seen.set(t.train_number, t);
+    });
+    return Array.from(seen.values());
+  }, [trains]);
+
+  // ── Filter ─────────────────────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    let result = uniqueTrains.filter(t => {
+      const matchSearch  = !q ||
+        (t.name  || '').toLowerCase().includes(q) ||
+        (t.train_number || '').toLowerCase().includes(q);
+      const matchStatus  = statusFilter === 'all' ||
+        (t.status || '').toLowerCase() === statusFilter.toLowerCase();
+      const matchType    = typeFilter === 'all' ||
+        (t.type   || '').toLowerCase() === typeFilter.toLowerCase();
+      return matchSearch && matchStatus && matchType;
+    });
+
+    // ── Sort ───────────────────────────────────────────────────────────────
+    const STATUS_ORDER = { on_time: 0, arrived: 1, departed: 2, delayed: 3, cancelled: 4 };
+    switch (sortBy) {
+      case 'delay_desc': result = [...result].sort((a, b) => (b.delay_minutes || 0) - (a.delay_minutes || 0)); break;
+      case 'delay_asc':  result = [...result].sort((a, b) => (a.delay_minutes || 0) - (b.delay_minutes || 0)); break;
+      case 'speed_desc': result = [...result].sort((a, b) => (b.speed_kmh || 0) - (a.speed_kmh || 0)); break;
+      case 'occ_desc':   result = [...result].sort((a, b) => {
+        const ra = a.passenger_count / (a.capacity || 1);
+        const rb = b.passenger_count / (b.capacity || 1);
+        return rb - ra;
+      }); break;
+      case 'status':     result = [...result].sort((a, b) =>
+        (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)); break;
+      default: break;
+    }
+    return result;
+  }, [uniqueTrains, search, statusFilter, typeFilter, sortBy]);
 
   const generateAnalysis = () => {
     if (analysisOpen && !aiLoading) {
@@ -141,7 +184,10 @@ export default function Trains() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Train Management</h1>
           <div className="flex items-center gap-3 mt-1">
-            <p className="text-xs text-muted-foreground font-mono">{trains.length} active trains in network</p>
+            <p className="text-xs text-muted-foreground font-mono">
+              {filtered.length} of {uniqueTrains.length} trains
+              {statusFilter !== 'all' || typeFilter !== 'all' || search ? ' (filtered)' : ' in network'}
+            </p>
             {/* Backend sync status */}
             <div className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${
               syncStatus === 'live'    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
@@ -243,7 +289,7 @@ export default function Trains() {
         </div>
       )}
 
-      {/* Filters */}
+      {/* Filters + Sort */}
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -253,12 +299,33 @@ export default function Trains() {
         </div>
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
           className="px-3 py-2 rounded-lg border border-border bg-card text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary capitalize">
-          {STATUS_OPTIONS.map(s => <option key={s} value={s} className="capitalize">{s === 'all' ? 'All Status' : s.replace('_', ' ')}</option>)}
+          {STATUS_OPTIONS.map(s => (
+            <option key={s} value={s} className="capitalize bg-card">
+              {s === 'all' ? 'All Status' : s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+            </option>
+          ))}
         </select>
         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-          className="px-3 py-2 rounded-lg border border-border bg-card text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary">
-          {TYPE_OPTIONS.map(t => <option key={t} value={t}>{t === 'all' ? 'All Types' : t.replace('_', ' ')}</option>)}
+          className="px-3 py-2 rounded-lg border border-border bg-card text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary capitalize">
+          {TYPE_OPTIONS.map(t => (
+            <option key={t} value={t} className="capitalize bg-card">
+              {t === 'all' ? 'All Types' : t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+            </option>
+          ))}
         </select>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+          className="px-3 py-2 rounded-lg border border-border bg-card text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary">
+          {SORT_OPTIONS.map(o => (
+            <option key={o.value} value={o.value} className="bg-card">{o.label}</option>
+          ))}
+        </select>
+        {(statusFilter !== 'all' || typeFilter !== 'all' || sortBy !== 'default' || search) && (
+          <button
+            onClick={() => { setSearch(''); setStatusFilter('all'); setTypeFilter('all'); setSortBy('default'); }}
+            className="px-3 py-2 rounded-lg border border-border bg-destructive/10 text-destructive text-sm hover:bg-destructive/20 transition-colors">
+            Clear Filters
+          </button>
+        )}
       </div>
 
       {/* Grid */}
