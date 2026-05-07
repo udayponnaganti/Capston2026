@@ -13,6 +13,7 @@ const STATUS_COLORS = {
   arrived:   { fill: '#3b9eff', glow: '#3b9eff80' },
   delayed:   { fill: '#f59e0b', glow: '#f59e0b80' },
   cancelled: { fill: '#ef4444', glow: '#ef444480' },
+  stalled:   { fill: '#94a3b8', glow: '#94a3b840' }, // grey for stale/stalled
 };
 
 const ROUTE_LINES = [
@@ -87,106 +88,177 @@ function createStationIcon(isArriving) {
 // ── Inner component: manages live marker layer directly on Leaflet map ─────────
 function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
   const map = useMap();
-  const markersRef = useRef({});       // train_number → L.marker
-  const prevTrainsRef = useRef({});    // train_number → { lat, lng }
-  const interpRef = useRef({});        // train_number → { fromLat, fromLng, toLat, toLng, t }
-  const rafRef = useRef(null);
+  const markersRef = useRef({});   // id → L.marker
+  const stateRef   = useRef({});   // id → animation state
+  const rafRef     = useRef(null);
 
-  // Smooth animation loop
+  // ── Physics constants ───────────────────────────────────────────────────────
+  // STALE_THRESHOLD: treat feed as stale after this many seconds without update
+  const STALE_SECS    = 180;  
+  // How many seconds to dwell at a stop before resuming animation
+  const DWELL_SECS    = 15;   
+
+  // ── rAF animation loop ──────────────────────────────────────────────────────
   useEffect(() => {
-    const animate = () => {
-      Object.entries(interpRef.current).forEach(([id, state]) => {
-        if (!markersRef.current[id]) return;
-        
-        // Extremely slow animation to make 30-second GTFS jumps look continuous
-        const dist = Math.hypot(state.toLat - state.fromLat, state.toLng - state.fromLng);
-        const stepSize = dist > 0 ? 0.0006 : 1; 
-        
-        state.t = Math.min(1, state.t + stepSize); 
-        const lat = lerp(state.fromLat, state.toLat, state.t);
-        const lng = lerp(state.fromLng, state.toLng, state.t);
-        markersRef.current[id].setLatLng([lat, lng]);
+    const animate = (nowMs) => {
+      const nowSecs = nowMs / 1000;
+
+      Object.entries(stateRef.current).forEach(([id, s]) => {
+        const marker = markersRef.current[id];
+        if (!marker) return;
+
+        // ── Dwell at station ───────────────────────────────────────────────
+        if (s.dwellUntil && nowSecs < s.dwellUntil) return;
+
+        // ── No destination or stale ────────────────────────────────────────
+        if (!s.nextLat || !s.nextLng) return;
+        if (s.stale) return;
+
+        // ── Time-based progress ────────────────────────────────────────────
+        // We want the train to reach nextLat/nextLng by arrivalAt.
+        // If arrivalAt unknown, interpolate over a fixed window.
+        const travelWindow = s.arrivalAt ? (s.arrivalAt - s.departedAt) : 45; // seconds
+        const elapsed      = nowSecs - s.departedAt;
+        const rawT         = travelWindow > 0 ? Math.min(elapsed / travelWindow, 1) : 1;
+
+        // Ease-in-out for smooth decel/accel around stations
+        const t = rawT < 0.5
+          ? 2 * rawT * rawT
+          : 1 - (-2 * rawT + 2) ** 2 / 2;
+
+        const lat = s.fromLat + (s.nextLat - s.fromLat) * t;
+        const lng = s.fromLng + (s.nextLng - s.fromLng) * t;
+        marker.setLatLng([lat, lng]);
+
+        // When arrived, begin dwell then snap to next target
+        if (rawT >= 1) {
+          s.fromLat    = s.nextLat;
+          s.fromLng    = s.nextLng;
+          s.dwellUntil = nowSecs + (s.isDwelling ? DWELL_SECS : 3);
+          // Clear target so we wait for next feed update
+          s.nextLat = null;
+          s.nextLng = null;
+        }
       });
+
       rafRef.current = requestAnimationFrame(animate);
     };
     rafRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  // Sync markers with train state every tick
+  // ── Sync markers from feed every 500ms ─────────────────────────────────────
   useEffect(() => {
-    const interval = setInterval(() => {
-      const trains = trainsRef.current;
-      const selected = selectedRef.current;
+    const tick = setInterval(() => {
+      const trains  = trainsRef.current;
+      const sel     = selectedRef.current;
       if (!trains.length) return;
 
-      const seen = new Set();
+      const nowSecs = Date.now() / 1000;
+      const seen    = new Set();
+
       trains.forEach(train => {
-        const id = train.train_number;
+        const id   = train.train_number;
         seen.add(id);
 
-        const prev = prevTrainsRef.current[id];
-        const newLat = train.latitude;
-        const newLng = train.longitude;
+        // ── Staleness check ──────────────────────────────────────────────
+        const ageSecs  = train.age_seconds ?? (nowSecs - (train.feed_timestamp ?? nowSecs));
+        const isStale  = ageSecs > STALE_SECS;
+        const effStatus = isStale ? 'stalled' : train.status;
 
+        // ── Create marker if new ─────────────────────────────────────────
         if (!markersRef.current[id]) {
-          // Create new marker
-          const marker = L.marker([newLat, newLng], {
-            icon: createTrainIcon(train.status, selected === id),
-            zIndexOffset: selected === id ? 1000 : 0,
+          const marker = L.marker([train.latitude, train.longitude], {
+            icon: createTrainIcon(effStatus, sel === id),
+            zIndexOffset: sel === id ? 1000 : 0,
           }).addTo(map);
 
           marker.on('click', () => onSelect(id));
-          marker.bindPopup(`
-            <div style="background:#0d1424;color:#e2e8f0;padding:10px;border-radius:8px;min-width:170px;font-family:sans-serif">
-              <div style="font-weight:700;font-size:13px">${train.name}</div>
-              <div style="font-size:11px;color:#3b9eff;font-family:monospace">${train.train_number}</div>
-              <div style="font-size:11px;margin-top:5px;color:#94a3b8">${train.current_station} → ${train.next_station}</div>
-              <div style="font-size:11px;margin-top:3px;color:#f59e0b">${train.speed_kmh} km/h · ${train.status}</div>
-            </div>
-          `, { className: 'train-popup' });
-
+          marker.bindPopup(buildPopup(train, effStatus), { className: 'train-popup' });
           markersRef.current[id] = marker;
-          interpRef.current[id] = { fromLat: newLat, fromLng: newLng, toLat: newLat, toLng: newLng, t: 1 };
-        } else {
-          // Update icon for selection/status changes
-          markersRef.current[id].setIcon(createTrainIcon(train.status, selected === id));
-          markersRef.current[id].setZIndexOffset(selected === id ? 1000 : 0);
 
-          // Kick off smooth interpolation to new position
-          const curLat = markersRef.current[id].getLatLng().lat;
-          const curLng = markersRef.current[id].getLatLng().lng;
-          if (Math.abs(newLat - curLat) > 0.00001 || Math.abs(newLng - curLng) > 0.00001) {
-            interpRef.current[id] = { fromLat: curLat, fromLng: curLng, toLat: newLat, toLng: newLng, t: 0 };
+          // Init physics state
+          stateRef.current[id] = {
+            fromLat:    train.latitude,
+            fromLng:    train.longitude,
+            nextLat:    train.next_latitude,
+            nextLng:    train.next_longitude,
+            departedAt: nowSecs,
+            arrivalAt:  train.arrival_at_next,
+            isDwelling: train.is_dwelling,
+            dwellUntil: train.is_dwelling ? nowSecs + DWELL_SECS : null,
+            stale:      isStale,
+          };
+        } else {
+          const s = stateRef.current[id];
+
+          // ── Detect new position from feed ────────────────────────────────
+          const dLat = Math.abs(train.latitude  - s.fromLat);
+          const dLng = Math.abs(train.longitude - s.fromLng);
+          const hasMoved = dLat > 0.00005 || dLng > 0.00005;
+
+          if (hasMoved) {
+            // Snap from to new reported position, animate towards next
+            s.fromLat    = train.latitude;
+            s.fromLng    = train.longitude;
+            s.nextLat    = train.next_latitude;
+            s.nextLng    = train.next_longitude;
+            s.departedAt = nowSecs;
+            s.arrivalAt  = train.arrival_at_next;
+            s.isDwelling = train.is_dwelling;
+            s.stale      = isStale;
+            // If dwelling, override next target
+            if (train.is_dwelling) {
+              s.dwellUntil = nowSecs + DWELL_SECS;
+              s.nextLat    = null;
+              s.nextLng    = null;
+            }
+          } else if (s.nextLat == null && train.next_latitude) {
+            // Same reported position but we now have a next target: set it
+            s.nextLat   = train.next_latitude;
+            s.nextLng   = train.next_longitude;
+            s.departedAt = nowSecs;
+            s.arrivalAt  = train.arrival_at_next;
           }
 
-          // Update popup content
-          markersRef.current[id].setPopupContent(`
-            <div style="background:#0d1424;color:#e2e8f0;padding:10px;border-radius:8px;min-width:170px;font-family:sans-serif">
-              <div style="font-weight:700;font-size:13px">${train.name}</div>
-              <div style="font-size:11px;color:#3b9eff;font-family:monospace">${train.train_number}</div>
-              <div style="font-size:11px;margin-top:5px;color:#94a3b8">${train.current_station} → ${train.next_station}</div>
-              <div style="font-size:11px;margin-top:3px;color:#f59e0b">${train.speed_kmh} km/h · ${train.status}</div>
-            </div>
-          `);
+          s.stale = isStale;
+
+          // ── Update icon if status/selection changed ───────────────────────
+          markersRef.current[id].setIcon(createTrainIcon(effStatus, sel === id));
+          markersRef.current[id].setZIndexOffset(sel === id ? 1000 : 0);
+          markersRef.current[id].setPopupContent(buildPopup(train, effStatus));
         }
-        prevTrainsRef.current[id] = { lat: newLat, lng: newLng };
       });
 
-      // Remove departed trains
+      // ── Remove markers for trains that left the feed ─────────────────────
       Object.keys(markersRef.current).forEach(id => {
         if (!seen.has(id)) {
           map.removeLayer(markersRef.current[id]);
           delete markersRef.current[id];
-          delete interpRef.current[id];
+          delete stateRef.current[id];
         }
       });
-    }, 500); // check every 500ms for smooth updates
-
-    return () => clearInterval(interval);
+    }, 500);
+    return () => clearInterval(tick);
   }, [map, trainsRef, selectedRef, onSelect]);
 
   return null;
+}
+
+function buildPopup(train, effStatus) {
+  const statusColor = STATUS_COLORS[effStatus]?.fill || '#fff';
+  return `
+    <div style="background:#0d1424;color:#e2e8f0;padding:10px;border-radius:8px;min-width:180px;font-family:sans-serif">
+      <div style="font-weight:700;font-size:13px">${train.name}</div>
+      <div style="font-size:10px;color:#3b9eff;font-family:monospace;margin-top:2px">${train.train_number}</div>
+      <div style="font-size:11px;margin-top:6px;color:#94a3b8">${train.current_station} → ${train.next_station}</div>
+      <div style="margin-top:6px;display:flex;gap:10px">
+        <span style="font-size:11px;color:#e2e8f0">${train.speed_kmh} km/h</span>
+        <span style="font-size:11px;color:${statusColor}">${train.status_label || train.status}</span>
+      </div>
+      ${train.delay_minutes > 0 ? `<div style="font-size:10px;color:#f59e0b;margin-top:3px">+${train.delay_minutes} min delay</div>` : ''}
+    </div>
+  `;
 }
 
 // ── Station layer (static) ─────────────────────────────────────────────────────
@@ -262,17 +334,35 @@ export default function LiveMap() {
     setShowAiRoute(false);
   }, []);
 
+  const [aiReducedDelay, setAiReducedDelay] = useState({});
+
   const handleSimulateReroute = () => {
     setIsSimulating(true);
     setTimeout(() => {
       setIsSimulating(false);
       setShowAiRoute(false);
-      // We would ideally dispatch to backend here, but for UI demo we just deselect
-      setSelected(null); 
+      
+      // Simulate reroute by applying a delay reduction to the specific train
+      const train = trains.find(t => t.train_number === selected);
+      if (train) {
+        const reduction = Math.round(train.delay_minutes * 0.6);
+        setAiReducedDelay(prev => ({
+          ...prev,
+          [train.train_number]: (prev[train.train_number] || 0) + reduction
+        }));
+      }
     }, 2000);
   };
 
-  const selectedTrain = trains.find(t => t.train_number === selected);
+  const activeTrains = trains.map(t => {
+    if (aiReducedDelay[t.train_number]) {
+      const newDelay = Math.max(0, t.delay_minutes - aiReducedDelay[t.train_number]);
+      return { ...t, delay_minutes: newDelay, status: newDelay === 0 ? 'on_time' : 'delayed' };
+    }
+    return t;
+  });
+
+  const selectedTrain = activeTrains.find(t => t.train_number === selected);
   const occupancy = selectedTrain && selectedTrain.capacity > 0
     ? Math.round((selectedTrain.passenger_count / selectedTrain.capacity) * 100) : 0;
 
@@ -288,7 +378,7 @@ export default function LiveMap() {
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           attribution='&copy; <a href="https://carto.com">CARTO</a>'
         />
-        <StationLayer trains={trains} isMtaLive={syncStatus === 'live'} onStationClick={handleStationSelect} />
+        <StationLayer trains={activeTrains} isMtaLive={syncStatus === 'live'} onStationClick={handleStationSelect} />
         {/* Render authentic GTFS shapes if available */}
         {syncStatus === 'live' && Object.entries(shapes).map(([shapeId, shapeData]) => (
           <Polyline 
@@ -348,7 +438,7 @@ export default function LiveMap() {
           <div className="ml-auto w-1.5 h-1.5 rounded-full bg-accent animate-live-pulse" />
         </div>
         <div className="max-h-52 overflow-y-auto divide-y divide-border">
-          {trains.map(train => {
+          {activeTrains.map(train => {
             const { fill } = STATUS_COLORS[train.status] || STATUS_COLORS.on_time;
             const occ = train.capacity > 0 ? Math.round((train.passenger_count / train.capacity) * 100) : null;
             return (
@@ -523,7 +613,7 @@ export default function LiveMap() {
           <div>
             <div className="text-xs font-bold text-muted-foreground uppercase tracking-wide mb-2">Live Approaching Trains</div>
             <div className="space-y-2">
-              {trains
+              {activeTrains
                 .filter(t => t.next_station === selectedStation.name || t.current_station === selectedStation.name)
                 .slice(0, 4)
                 .map(t => (
@@ -538,7 +628,7 @@ export default function LiveMap() {
                     <div className="text-xs font-mono">{t.speed_kmh || 45} km/h</div>
                   </div>
               ))}
-              {trains.filter(t => t.next_station === selectedStation.name || t.current_station === selectedStation.name).length === 0 && (
+              {activeTrains.filter(t => t.next_station === selectedStation.name || t.current_station === selectedStation.name).length === 0 && (
                 <div className="text-xs text-muted-foreground text-center py-2">No trains currently approaching.</div>
               )}
             </div>
