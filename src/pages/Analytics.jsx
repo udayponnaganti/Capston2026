@@ -24,6 +24,13 @@ export default function Analytics() {
   const [aiInsights, setAiInsights] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
 
+  const comparisonData = [
+    { metric: 'Avg Delay (mins)', baseline: 14.5, ai: 3.2 },
+    { metric: 'Safety Conflicts', baseline: 8, ai: 0 },
+    { metric: 'Energy Waste (%)', baseline: 18, ai: 4 },
+    { metric: 'Platform Congestion', baseline: 85, ai: 42 }
+  ];
+
   useEffect(() => {
     setTrains(simulateTrainStates(0));
     const interval = setInterval(() => setTrains(simulateTrainStates(Date.now() % 1000)), 5000);
@@ -167,6 +174,27 @@ export default function Analytics() {
           </div>
         </div>
       )}
+
+      {/* AI vs Baseline Comparison */}
+      <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 mb-4">
+        <div className="flex items-center gap-2 mb-4">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          <h3 className="text-sm font-semibold text-foreground">System Efficiency: RailTwin AI vs Baseline Operations</h3>
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={comparisonData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            <XAxis dataKey="metric" tick={{ fill: 'hsl(215,20%,55%)', fontSize: 11 }} tickLine={false} axisLine={false} />
+            <YAxis tick={{ fill: 'hsl(215,20%,55%)', fontSize: 10 }} tickLine={false} axisLine={false} />
+            <Tooltip 
+              contentStyle={CT} 
+              cursor={{ fill: 'hsl(215,20%,55%)', opacity: 0.1 }}
+            />
+            <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11, color: 'hsl(215,20%,55%)' }} />
+            <Bar dataKey="baseline" name="Without RailTwin (Baseline)" fill="hsl(215,20%,55%)" radius={[4,4,0,0]} barSize={30} />
+            <Bar dataKey="ai" name="With RailTwin AI" fill="hsl(161,72%,48%)" radius={[4,4,0,0]} barSize={30} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

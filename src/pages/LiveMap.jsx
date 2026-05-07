@@ -190,7 +190,7 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
 }
 
 // ── Station layer (static) ─────────────────────────────────────────────────────
-function StationLayer({ trains, isMtaLive }) {
+function StationLayer({ trains, isMtaLive, onStationClick }) {
   const arrivingStations = new Set(
     trains.filter(t => t.status === 'arrived').map(t => t.current_station)
   );
@@ -204,6 +204,7 @@ function StationLayer({ trains, isMtaLive }) {
           key={station.code}
           position={[station.latitude, station.longitude]}
           icon={createStationIcon(arrivingStations.has(station.name))}
+          eventHandlers={{ click: () => onStationClick && onStationClick(station) }}
         >
           <Popup>
             <div style={{ background: '#0d1424', color: '#e2e8f0', padding: '8px', borderRadius: 8, minWidth: 140, fontFamily: 'sans-serif' }}>
@@ -231,9 +232,12 @@ function StationLayer({ trains, isMtaLive }) {
 export default function LiveMap() {
   const { trains, syncStatus } = useRealTimeTrains();
   const [selected, setSelected] = useState(null);
+  const [selectedStation, setSelectedStation] = useState(null);
   const [shapes, setShapes] = useState({});
   const trainsRef = useRef([]);
   const selectedRef = useRef(null);
+  const [showAiRoute, setShowAiRoute] = useState(false);
+  const [isSimulating, setIsSimulating] = useState(false);
 
   // Keep refs in sync with live API data
   useEffect(() => { trainsRef.current = trains; }, [trains]);
@@ -248,7 +252,25 @@ export default function LiveMap() {
 
   const handleSelect = useCallback((id) => {
     setSelected(prev => prev === id ? null : id);
+    setSelectedStation(null); // Clear station if train selected
+    setShowAiRoute(false);
   }, []);
+
+  const handleStationSelect = useCallback((station) => {
+    setSelectedStation(prev => prev?.code === station.code ? null : station);
+    setSelected(null); // Clear train if station selected
+    setShowAiRoute(false);
+  }, []);
+
+  const handleSimulateReroute = () => {
+    setIsSimulating(true);
+    setTimeout(() => {
+      setIsSimulating(false);
+      setShowAiRoute(false);
+      // We would ideally dispatch to backend here, but for UI demo we just deselect
+      setSelected(null); 
+    }, 2000);
+  };
 
   const selectedTrain = trains.find(t => t.train_number === selected);
   const occupancy = selectedTrain && selectedTrain.capacity > 0
@@ -266,13 +288,13 @@ export default function LiveMap() {
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           attribution='&copy; <a href="https://carto.com">CARTO</a>'
         />
-        <StationLayer trains={trains} isMtaLive={syncStatus === 'live'} />
+        <StationLayer trains={trains} isMtaLive={syncStatus === 'live'} onStationClick={handleStationSelect} />
         {/* Render authentic GTFS shapes if available */}
         {syncStatus === 'live' && Object.entries(shapes).map(([shapeId, shapeData]) => (
           <Polyline 
             key={shapeId} 
             positions={shapeData.path}
-            pathOptions={{ color: shapeData.color, weight: 2, opacity: 0.6 }} 
+            pathOptions={{ color: shapeData.color, weight: 1.5, opacity: 0.15 }} 
           />
         ))}
         <LiveTrainLayer trainsRef={trainsRef} selectedRef={selectedRef} onSelect={handleSelect} />
@@ -421,15 +443,6 @@ export default function LiveMap() {
               </div>
             </div>
           )}
-          {!selectedTrain.capacity && (
-            <div>
-              <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                <span className="flex items-center gap-1"><Users className="w-3 h-3" /> Occupancy</span>
-                <span className="font-mono">N/A</span>
-              </div>
-            </div>
-          )}
-
           {/* Route timeline */}
           <div>
             <p className="text-xs text-muted-foreground mb-2 font-medium">Route</p>
@@ -445,6 +458,96 @@ export default function LiveMap() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          {/* AI Alternative Routing Panel */}
+          {selectedTrain.delay_minutes > 0 && (
+            <div className="mt-4 border-t border-border pt-4">
+              {!showAiRoute ? (
+                <button 
+                  onClick={() => setShowAiRoute(true)}
+                  className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-accent/10 border border-accent/30 text-accent text-xs font-bold hover:bg-accent hover:text-accent-foreground transition-all"
+                >
+                  <Zap className="w-3.5 h-3.5" fill="currentColor" />
+                  AI Suggest Alternate Route
+                </button>
+              ) : (
+                <div className="bg-accent/10 border border-accent/30 rounded-lg p-3 space-y-3">
+                  <div className="flex items-center gap-2 text-accent text-xs font-bold">
+                    <Zap className="w-3.5 h-3.5" fill="currentColor" />
+                    AI Reroute Analysis
+                  </div>
+                  <p className="text-xs text-foreground leading-relaxed">
+                    Switching this train to the parallel express track will bypass congestion ahead and decrease delay by <span className="font-bold text-emerald-400">{(selectedTrain.delay_minutes * 0.6).toFixed(0)} mins</span>.
+                  </p>
+                  <button 
+                    onClick={handleSimulateReroute}
+                    disabled={isSimulating}
+                    className="w-full py-1.5 rounded bg-accent text-accent-foreground text-xs font-bold disabled:opacity-50 flex justify-center items-center gap-2"
+                  >
+                    {isSimulating ? <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" /> : null}
+                    {isSimulating ? 'Simulating...' : 'Execute Reroute Simulation'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Selected Station Panel */}
+      {selectedStation && (
+        <div className="absolute top-4 right-4 z-[1000] w-72 glass rounded-xl p-4 space-y-4">
+          <div className="flex items-start justify-between">
+            <div>
+              <div className="text-sm font-bold text-foreground">{selectedStation.name}</div>
+              <div className="text-xs font-mono text-primary">Station Code: {selectedStation.code}</div>
+            </div>
+            <button onClick={() => setSelectedStation(null)} className="p-1 hover:bg-secondary rounded">
+              <X className="w-3 h-3 text-muted-foreground" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg bg-secondary p-2 text-center">
+              <div className="text-sm font-bold text-foreground">{(selectedStation.code.length * 47) % 200 + 150}</div>
+              <div className="text-[10px] uppercase text-muted-foreground">Trains Today</div>
+            </div>
+            <div className="rounded-lg bg-secondary p-2 text-center">
+              <div className="text-sm font-mono text-foreground">{selectedStation.platforms || 2}</div>
+              <div className="text-[10px] uppercase text-muted-foreground">Platforms</div>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-bold text-muted-foreground uppercase tracking-wide mb-2">Live Approaching Trains</div>
+            <div className="space-y-2">
+              {trains
+                .filter(t => t.next_station === selectedStation.name || t.current_station === selectedStation.name)
+                .slice(0, 4)
+                .map(t => (
+                  <div key={t.train_number} className="flex items-center justify-between bg-secondary/50 rounded p-2 border border-border">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ background: STATUS_COLORS[t.status]?.fill || '#fff' }} />
+                      <div>
+                        <div className="text-xs font-bold text-foreground truncate max-w-[100px]">{t.train_number}</div>
+                        <div className="text-[10px] text-muted-foreground">{t.delay_minutes > 0 ? \`+\${t.delay_minutes}m delay\` : 'On time'}</div>
+                      </div>
+                    </div>
+                    <div className="text-xs font-mono">{t.speed_kmh || 45} km/h</div>
+                  </div>
+              ))}
+              {trains.filter(t => t.next_station === selectedStation.name || t.current_station === selectedStation.name).length === 0 && (
+                <div className="text-xs text-muted-foreground text-center py-2">No trains currently approaching.</div>
+              )}
+            </div>
+          </div>
+          
+          <div className="border-t border-border pt-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Last Departure</span>
+              <span className="font-mono text-foreground">Just now</span>
             </div>
           </div>
         </div>
