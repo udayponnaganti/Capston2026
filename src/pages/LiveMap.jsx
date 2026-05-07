@@ -98,9 +98,9 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
       Object.entries(interpRef.current).forEach(([id, state]) => {
         if (!markersRef.current[id]) return;
         
-        // Slower animation if we have large jumps from real polling
+        // Extremely slow animation to make 30-second GTFS jumps look continuous
         const dist = Math.hypot(state.toLat - state.fromLat, state.toLng - state.fromLng);
-        const stepSize = dist > 0.01 ? 0.005 : 0.035; 
+        const stepSize = dist > 0 ? 0.0006 : 1; 
         
         state.t = Math.min(1, state.t + stepSize); 
         const lat = lerp(state.fromLat, state.toLat, state.t);
