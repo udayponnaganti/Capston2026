@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle, XCircle, Info, Zap, Loader2, RefreshCw, Train,
-         MapPin, Clock, Cpu, ChevronRight, CheckCircle2, X, Users, Shield, Settings } from 'lucide-react';
+         MapPin, Clock, Cpu, ChevronRight, CheckCircle2, X, Users, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { simulateTrainStates } from '@/lib/trainSimulation';
 import { base44 } from '@/api/base44Client';
+import { parseAISuggestionToNotifications, savePassengerNotifications } from '@/lib/passengerNotifications';
 
 // ─── severity config ───────────────────────────────────────────────────────────
 const severityConfig = {
@@ -85,7 +86,6 @@ function generateTasks(alert) {
 // ─── Incident Response Panel (slide-over) ──────────────────────────────────────
 function IncidentPanel({ alert, onClose }) {
   const [leadTeam, setLeadTeam] = useState(
-    // Auto-detect best lead team from AI suggestion
     () => {
       const sug = (alert.ai_suggestion || '').toLowerCase();
       if (sug.includes('electrical') || sug.includes('signal')) return 'electrical';
@@ -96,11 +96,13 @@ function IncidentPanel({ alert, onClose }) {
       return 'operations';
     }
   );
-  const [notes, setNotes]       = useState('');
-  const [tasks]                 = useState(() => generateTasks(alert));
+  const [notes, setNotes]           = useState('');
+  const [tasks]                     = useState(() => generateTasks(alert));
   const [triggering, setTriggering] = useState(false);
   const [triggered, setTriggered]   = useState(false);
   const [aiApplied, setAiApplied]   = useState(false);
+  // Pre-compute passenger notifications so user can preview them
+  const [passengerNotifs]           = useState(() => parseAISuggestionToNotifications(alert, {}));
 
   const cfg  = severityConfig[alert.severity] || severityConfig.info;
   const Icon = cfg.icon;
@@ -132,14 +134,20 @@ function IncidentPanel({ alert, onClose }) {
       triggered_at:   new Date().toISOString(),
     };
 
-    // Always save locally first (guaranteed to work)
+    // 1. Save workflow locally
     try {
       const existing = JSON.parse(localStorage.getItem('railtwin_workflows') || '[]');
       existing.unshift({ ...workflow, id: `wf-${Date.now()}` });
       localStorage.setItem('railtwin_workflows', JSON.stringify(existing.slice(0, 50)));
     } catch (_) {}
 
-    // Also try backend (non-blocking)
+    // 2. Push passenger notifications derived from AI suggestion
+    if (alert.ai_suggestion) {
+      const notifs = parseAISuggestionToNotifications(alert, workflow);
+      savePassengerNotifications(notifs);
+    }
+
+    // 3. Try backend (non-blocking)
     try {
       await base44.entities.IncidentWorkflow.create(workflow);
     } catch (_) { /* backend unavailable – local save already done */ }
@@ -282,6 +290,33 @@ function IncidentPanel({ alert, onClose }) {
               ))}
             </div>
           </div>
+
+          {/* Passenger Notifications Preview */}
+          {passengerNotifs.length > 0 && (
+            <div>
+              <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-3 flex items-center gap-1.5">
+                <Bell className="w-3 h-3" /> Passenger Notifications to Send
+              </label>
+              <div className="space-y-2">
+                {passengerNotifs.map((n, i) => (
+                  <div key={i} className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl border"
+                    style={{ background: 'hsla(211,100%,62%,0.05)', borderColor: 'hsla(211,100%,62%,0.2)' }}>
+                    <span className="text-base flex-shrink-0 leading-none mt-0.5">
+                      {n.type === 'eta' ? '🕐' : n.type === 'platform' ? '🚉' : n.type === 'service' ? '🔄' : n.type === 'boarding' ? '👥' : n.type === 'safety' ? '⚠️' : '📢'}
+                    </span>
+                    <div>
+                      <p className="text-xs font-semibold text-primary">{n.title}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{n.message}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                <Bell className="w-3 h-3" />
+                These {passengerNotifs.length} notification{passengerNotifs.length > 1 ? 's' : ''} will be sent to passengers on trigger.
+              </p>
+            </div>
+          )}
 
           {/* Impact */}
           {alert.impact && (

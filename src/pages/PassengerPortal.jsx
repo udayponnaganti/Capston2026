@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Home, Search, Map, AlertTriangle, Star, ArrowRight, Users, Train, LogIn, LogOut, X, XCircle, Info, Zap } from 'lucide-react';
+import { Home, Search, Map, AlertTriangle, Star, ArrowRight, Users, Train,
+  LogIn, LogOut, X, XCircle, Info, Zap, Bell, BellRing, CheckCircle2 } from 'lucide-react';
 import { simulateTrainStates, getNetworkStats, STATIONS } from '@/lib/trainSimulation';
 import moment from 'moment';
+import { getPassengerNotifications, markNotificationRead, clearPassengerNotifications } from '@/lib/passengerNotifications';
 
 const TABS = [
-  { id: 'home', label: 'Home', icon: Home },
-  { id: 'track', label: 'Track', icon: Search },
-  { id: 'journey', label: 'Journey', icon: Map },
-  { id: 'alerts', label: 'Alerts', icon: AlertTriangle },
-  { id: 'favorites', label: 'Favorites', icon: Star },
+  { id: 'home',          label: 'Home',          icon: Home },
+  { id: 'track',         label: 'Track',         icon: Search },
+  { id: 'journey',       label: 'Journey',       icon: Map },
+  { id: 'alerts',        label: 'Alerts',        icon: AlertTriangle },
+  { id: 'notifications', label: 'Notify',        icon: Bell },
+  { id: 'favorites',     label: 'Favorites',     icon: Star },
 ];
 
 function StatusBadge({ status }) {
@@ -70,6 +73,8 @@ export default function PassengerPortal() {
   const [tab, setTab] = useState('home');
   const [trains, setTrains] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [notifications, setNotifications] = useState(() => getPassengerNotifications());
+  const [bannerNotif, setBannerNotif] = useState(null);
   const [favorites, setFavorites] = useState(() => {
     try { return JSON.parse(localStorage.getItem('railtwin_favorites') || '[]'); } catch { return []; }
   });
@@ -91,6 +96,21 @@ export default function PassengerPortal() {
     setTrains(init);
     const interval = setInterval(() => setTrains(simulateTrainStates(Date.now() % 1000)), 5000);
     return () => clearInterval(interval);
+  }, []);
+
+  // ── Listen for new passenger notifications pushed from admin trigger ─────────
+  useEffect(() => {
+    const refresh = () => {
+      const fresh = getPassengerNotifications();
+      setNotifications(fresh);
+      // Show banner for first unread critical/warning
+      const unread = fresh.filter(n => !n.read);
+      if (unread.length > 0) setBannerNotif(unread[0]);
+    };
+    window.addEventListener('railtwin_notifications', refresh);
+    // Also poll every 10s in case portal was opened in another tab
+    const poll = setInterval(refresh, 10000);
+    return () => { window.removeEventListener('railtwin_notifications', refresh); clearInterval(poll); };
   }, []);
 
   // ── Read alerts from localStorage (written by admin Alerts page) ────────────
@@ -165,6 +185,22 @@ export default function PassengerPortal() {
   const allAlerts = alerts;
   const criticalAlerts = alerts.filter(a => a.severity === 'critical');
   const alertBadgeCount = criticalAlerts.length;
+  const unreadNotifCount = notifications.filter(n => !n.read).length;
+
+  const dismissBanner = () => {
+    if (bannerNotif) {
+      const updated = markNotificationRead(bannerNotif.id);
+      setNotifications(updated);
+    }
+    setBannerNotif(null);
+  };
+
+  const markAllRead = () => {
+    const updated = notifications.map(n => ({ ...n, read: true }));
+    try { localStorage.setItem('railtwin_passenger_notifications', JSON.stringify(updated)); } catch (_) {}
+    setNotifications(updated);
+    setBannerNotif(null);
+  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -176,11 +212,47 @@ export default function PassengerPortal() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Hi, {user.name}</span>
+          {/* Notification bell in top bar */}
+          <button onClick={() => setTab('notifications')}
+            className="relative p-1.5 hover:bg-secondary rounded-lg transition-colors">
+            {unreadNotifCount > 0
+              ? <BellRing className="w-4 h-4 text-primary" />
+              : <Bell className="w-4 h-4 text-muted-foreground" />}
+            {unreadNotifCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-[9px] text-white font-bold flex items-center justify-center">
+                {unreadNotifCount}
+              </span>
+            )}
+          </button>
           <button onClick={logout} className="p-1.5 hover:bg-secondary rounded-lg transition-colors">
             <LogOut className="w-3.5 h-3.5 text-muted-foreground" />
           </button>
         </div>
       </div>
+
+      {/* Live notification banner */}
+      {bannerNotif && tab !== 'notifications' && (
+        <div className="sticky top-[53px] z-20 mx-4 mt-3">
+          <div className="rounded-xl border px-4 py-3 flex items-start gap-3 shadow-lg"
+            style={{ background: 'hsl(222,41%,12%)', borderColor: bannerNotif.severity === 'critical' ? 'hsl(0,72%,51%,0.5)' : 'hsl(211,100%,62%,0.4)' }}>
+            <BellRing className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: bannerNotif.severity === 'critical' ? 'hsl(0,72%,65%)' : 'hsl(211,100%,72%)' }} />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-foreground">{bannerNotif.title}</p>
+              <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed line-clamp-2">{bannerNotif.message}</p>
+              {bannerNotif.train && <p className="text-xs font-mono mt-1" style={{color:'hsl(211,100%,72%)'}}>{bannerNotif.train}{bannerNotif.station ? ` · ${bannerNotif.station}` : ''}</p>}
+            </div>
+            <div className="flex flex-col gap-1 flex-shrink-0">
+              <button onClick={() => { setTab('notifications'); dismissBanner(); }}
+                className="text-xs px-2 py-1 rounded-lg font-medium" style={{ background: 'hsl(211,100%,62%,0.15)', color: 'hsl(211,100%,72%)' }}>
+                View
+              </button>
+              <button onClick={dismissBanner} className="p-1 hover:bg-secondary rounded-lg">
+                <X className="w-3.5 h-3.5 text-muted-foreground" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex-1 overflow-auto pb-20">
@@ -451,6 +523,73 @@ export default function PassengerPortal() {
             </div>
           )}
 
+          {/* Notifications tab */}
+          {tab === 'notifications' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-bold text-foreground">Passenger Notifications</h2>
+                <div className="flex gap-2">
+                  {notifications.length > 0 && (
+                    <button onClick={markAllRead}
+                      className="text-xs text-primary flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 transition-all">
+                      <CheckCircle2 className="w-3 h-3" /> Mark all read
+                    </button>
+                  )}
+                  {notifications.length > 0 && (
+                    <button onClick={() => { clearPassengerNotifications(); setNotifications([]); }}
+                      className="text-xs text-muted-foreground flex items-center gap-1 px-2 py-1 rounded-lg bg-secondary hover:bg-secondary/80 transition-all">
+                      <X className="w-3 h-3" /> Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {notifications.length === 0 ? (
+                <div className="text-center py-16 text-muted-foreground">
+                  <Bell className="w-10 h-10 mx-auto mb-3 opacity-20" />
+                  <p className="text-sm font-medium">No notifications yet</p>
+                  <p className="text-xs mt-1">Notifications appear here when operations team triggers an incident response.</p>
+                </div>
+              ) : notifications.map(n => {
+                const typeColors = {
+                  eta:      { bg: 'bg-yellow-500/8',  border: 'border-yellow-500/25', icon: '🕐', label: 'text-yellow-400' },
+                  platform: { bg: 'bg-blue-500/8',    border: 'border-blue-500/25',   icon: '🚉', label: 'text-blue-400' },
+                  service:  { bg: 'bg-purple-500/8',  border: 'border-purple-500/25', icon: '🔄', label: 'text-purple-400' },
+                  boarding: { bg: 'bg-orange-500/8',  border: 'border-orange-500/25', icon: '👥', label: 'text-orange-400' },
+                  safety:   { bg: 'bg-red-500/8',     border: 'border-red-500/25',    icon: '⚠️', label: 'text-red-400' },
+                  info:     { bg: 'bg-blue-500/5',    border: 'border-blue-500/20',   icon: '🧑‍✈️', label: 'text-blue-400' },
+                  general:  { bg: 'bg-secondary',     border: 'border-border',        icon: '📢', label: 'text-foreground' },
+                };
+                const tc = typeColors[n.type] || typeColors.general;
+                return (
+                  <div key={n.id} onClick={() => { if (!n.read) { const u = markNotificationRead(n.id); setNotifications(u); } }}
+                    className={`rounded-2xl border p-4 transition-all cursor-pointer ${tc.bg} ${tc.border} ${n.read ? 'opacity-60' : ''}`}>
+                    <div className="flex items-start gap-3">
+                      <span className="text-xl flex-shrink-0">{tc.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`text-xs font-bold ${tc.label}`}>{n.title}</span>
+                          {!n.read && <span className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />}
+                        </div>
+                        <p className="text-xs text-foreground leading-relaxed">{n.message}</p>
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          {n.train && <span className="text-xs font-mono text-muted-foreground">{n.train}</span>}
+                          {n.station && <span className="text-xs text-muted-foreground">· {n.station}</span>}
+                          {n.platform && (
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                              Platform {n.platform}
+                            </span>
+                          )}
+                          <span className="text-xs text-muted-foreground ml-auto">{moment(n.ts).fromNow()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Favorites */}
           {tab === 'favorites' && (
             <div className="space-y-3">
@@ -475,15 +614,22 @@ export default function PassengerPortal() {
       {/* Bottom nav */}
       <div className="fixed bottom-0 left-0 right-0 border-t border-border bg-card flex z-10">
         {TABS.map(({ id, label, icon: Icon }) => {
-              const alertBadge = id === 'alerts' && alertBadgeCount > 0;
+          const alertBadge  = id === 'alerts'        && alertBadgeCount > 0;
+          const notifBadge  = id === 'notifications' && unreadNotifCount > 0;
           return (
             <button key={id} onClick={() => setTab(id)}
-              className={`flex-1 flex flex-col items-center py-3 transition-all relative ${tab === id ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+              className={`flex-1 flex flex-col items-center py-3 transition-all relative ${
+                tab === id ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+              }`}>
               <div className="relative">
                 <Icon className="w-5 h-5" />
-                {alertBadge && <span className="absolute -top-1 -right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-[9px] text-white font-bold flex items-center justify-center">{alertBadgeCount}</span>}
+                {(alertBadge || notifBadge) && (
+                  <span className="absolute -top-1 -right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-[9px] text-white font-bold flex items-center justify-center">
+                    {alertBadge ? alertBadgeCount : unreadNotifCount}
+                  </span>
+                )}
               </div>
-              <span className="text-xs mt-0.5">{label}</span>
+              <span className="text-[10px] mt-0.5">{label}</span>
               {tab === id && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-primary rounded-full" />}
             </button>
           );
