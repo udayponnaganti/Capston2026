@@ -11,49 +11,110 @@ const __dirname = path.dirname(__filename);
 
 const POLL_INTERVAL_MS = 30000; // 30 seconds
 
+// Persistent cache of what Base44 already has, to avoid redundant reads
+let base44Cache = new Map(); // train_number → { id, latitude, longitude, status, delay_minutes }
+let lastFullSyncMs = 0;
+const FULL_SYNC_INTERVAL_MS = 120_000; // full re-read every 2 minutes
+const MAX_WRITES_PER_CYCLE  = 150;     // hard cap per 30s cycle to stay under rate limit
+const WRITE_DELAY_MS        = 80;      // ms between each API write
+
 async function syncToBase44(trains) {
   try {
-    // 1. Fetch existing records to know whether to create or update
-    const existing = await base44.entities.Train.list(null, 500);
-    const existingMap = new Map(existing.map(t => [t.train_number, t.id]));
+    const now = Date.now();
 
-    // 2. We keep track of which trains we updated so we can potentially clean up old ones
-    const activeTrainNumbers = new Set();
+    // Refresh our local cache from Base44 every 2 minutes
+    if (now - lastFullSyncMs > FULL_SYNC_INTERVAL_MS) {
+      const existing = await base44.entities.Train.list(null, 2000);
+      base44Cache = new Map(existing.map(t => [t.train_number, t]));
+      lastFullSyncMs = now;
+    }
 
-    // 3. Update or create
+    const activeSet  = new Set(trains.map(t => t.train_number));
+    let created = 0, updated = 0, deleted = 0;
+    const toWrite = [];
+
     for (const t of trains) {
-      activeTrainNumbers.add(t.train_number);
       const payload = {
-        train_number: t.train_number,
-        name: t.name,
-        status: t.status,
+        train_number:    t.train_number,
+        name:            t.name,
+        status:          t.status,
+        status_label:    t.status_label,
         current_station: t.current_station,
-        next_station: t.next_station,
-        latitude: t.latitude,
-        longitude: t.longitude,
-        speed_kmh: t.speed_kmh,
-        delay_minutes: t.delay_minutes,
-        route: t.route,
-        capacity: t.capacity,
-        passenger_count: t.occupancy
+        next_station:    t.next_station,
+        latitude:        t.latitude,
+        longitude:       t.longitude,
+        next_latitude:   t.next_latitude,
+        next_longitude:  t.next_longitude,
+        speed_kmh:       t.speed_kmh,
+        delay_minutes:   t.delay_minutes,
+        age_seconds:     t.age_seconds,
+        feed_timestamp:  t.feed_timestamp,
+        arrival_at_next: t.arrival_at_next,
+        is_dwelling:     t.is_dwelling,
+        route:           t.route,
+        capacity:        t.capacity,
+        passenger_count: t.occupancy,
+        platform:        t.platform,
       };
 
-      if (existingMap.has(t.train_number)) {
-        await base44.entities.Train.update(existingMap.get(t.train_number), payload);
+      const cached = base44Cache.get(t.train_number);
+      if (cached) {
+        // Only write if something meaningful changed
+        if (
+          cached.latitude     !== payload.latitude  ||
+          cached.longitude    !== payload.longitude  ||
+          cached.status       !== payload.status     ||
+          cached.delay_minutes !== payload.delay_minutes
+        ) {
+          toWrite.push({ type: 'update', id: cached.id, payload });
+        }
       } else {
-        await base44.entities.Train.create(payload);
+        toWrite.push({ type: 'create', payload });
       }
     }
 
-    // Delete trains from Base44 that are no longer active (or old simulated ones)
-    for (const [tNum, id] of existingMap.entries()) {
-      if (!activeTrainNumbers.has(tNum)) {
-        await base44.entities.Train.delete(id);
-        console.log('[Worker] Deleted stale train record:', tNum);
+    // Cap writes per cycle to avoid rate limits
+    const batch = toWrite.slice(0, MAX_WRITES_PER_CYCLE);
+
+    for (const op of batch) {
+      try {
+        if (op.type === 'update') {
+          await base44.entities.Train.update(op.id, op.payload);
+          base44Cache.set(op.payload.train_number, { ...base44Cache.get(op.payload.train_number), ...op.payload });
+          updated++;
+        } else {
+          const created_rec = await base44.entities.Train.create(op.payload);
+          base44Cache.set(op.payload.train_number, { id: created_rec.id, ...op.payload });
+          created++;
+        }
+        await new Promise(r => setTimeout(r, WRITE_DELAY_MS));
+      } catch(e) {
+        if (e.message?.includes('429')) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
       }
     }
+
+    // Clean up trains no longer in feed (limit to 20 deletes per cycle)
+    let deleteCount = 0;
+    for (const [tNum, rec] of base44Cache.entries()) {
+      if (!activeSet.has(tNum) && deleteCount < 20) {
+        try {
+          await base44.entities.Train.delete(rec.id);
+          base44Cache.delete(tNum);
+          console.log('[Worker] Deleted stale train:', tNum);
+          deleteCount++;
+          deleted++;
+        } catch(e) { /* ignore */ }
+      }
+    }
+
+    if (created + updated + deleted > 0) {
+      console.log(`[Worker] Sync: +${created} created, ~${updated} updated, -${deleted} deleted (${trains.length} active)`);
+    }
+
   } catch (error) {
-    console.error('Failed to sync snapshot to Base44:', error.message);
+    console.error('[Worker] Sync error:', error.message);
   }
 }
 
@@ -107,32 +168,20 @@ async function runPoller() {
     process.exit(1);
   }
 
-  // 2. Poll loop
-  setInterval(async () => {
+  // 2. Recursive Poll Loop
+  async function poll() {
     try {
-      console.log('[Worker] Fetching GTFS-RT feeds at ' + new Date().toISOString());
       const entities = await fetchLiveFeeds();
-      
       const trains = normalizeTrains(entities);
-      console.log('[Worker] Normalized ' + trains.length + ' active trains. Syncing to Base44...');
-      
       await syncToBase44(trains);
-      console.log('[Worker] Sync complete.');
-      
     } catch (err) {
       console.error('[Worker] Error during poll cycle:', err);
     }
-  }, POLL_INTERVAL_MS);
-
-  // Trigger first run immediately
-  try {
-    const entities = await fetchLiveFeeds();
-    const trains = normalizeTrains(entities);
-    await syncToBase44(trains);
-    console.log('[Worker] Initial sync complete (' + trains.length + ' trains).');
-  } catch (err) {
-    console.error('[Worker] Initial run failed:', err);
+    setTimeout(poll, POLL_INTERVAL_MS);
   }
+
+  // Trigger first run
+  poll();
 }
 
 runPoller();
