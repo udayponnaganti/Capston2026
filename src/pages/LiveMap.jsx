@@ -100,8 +100,12 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
 
   // ── rAF animation loop ──────────────────────────────────────────────────────
   useEffect(() => {
-    const animate = (nowMs) => {
-      const nowSecs = nowMs / 1000;
+    const animate = () => {
+      // CRITICAL: Use Date.now() here, NOT the rAF argument.
+      // rAF passes performance.now() (ms since page load, e.g. 45000)
+      // but departedAt/dwellUntil use Date.now()/1000 (Unix timestamp, e.g. 1715200000)
+      // Mixing the two makes elapsed always hugely negative → trains never move.
+      const nowSecs = Date.now() / 1000;
 
       Object.entries(stateRef.current).forEach(([id, s]) => {
         const marker = markersRef.current[id];
