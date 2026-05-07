@@ -231,12 +231,20 @@ function StationLayer({ trains, isMtaLive }) {
 export default function LiveMap() {
   const { trains, syncStatus } = useRealTimeTrains();
   const [selected, setSelected] = useState(null);
+  const [shapes, setShapes] = useState({});
   const trainsRef = useRef([]);
   const selectedRef = useRef(null);
 
   // Keep refs in sync with live API data
   useEffect(() => { trainsRef.current = trains; }, [trains]);
   useEffect(() => { selectedRef.current = selected; }, [selected]);
+
+  useEffect(() => {
+    fetch('/shapes.json')
+      .then(res => res.json())
+      .then(data => setShapes(data))
+      .catch(err => console.warn('Failed to load shapes:', err));
+  }, []);
 
   const handleSelect = useCallback((id) => {
     setSelected(prev => prev === id ? null : id);
@@ -259,6 +267,14 @@ export default function LiveMap() {
           attribution='&copy; <a href="https://carto.com">CARTO</a>'
         />
         <StationLayer trains={trains} isMtaLive={syncStatus === 'live'} />
+        {/* Render authentic GTFS shapes if available */}
+        {syncStatus === 'live' && Object.entries(shapes).map(([shapeId, shapeData]) => (
+          <Polyline 
+            key={shapeId} 
+            positions={shapeData.path}
+            pathOptions={{ color: shapeData.color, weight: 2, opacity: 0.6 }} 
+          />
+        ))}
         <LiveTrainLayer trainsRef={trainsRef} selectedRef={selectedRef} onSelect={handleSelect} />
       </MapContainer>
 

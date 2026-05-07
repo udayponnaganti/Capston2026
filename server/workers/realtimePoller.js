@@ -2,6 +2,12 @@ import { loadStaticGtfs, getStaticData } from '../gtfs/services/gtfsStaticLoader
 import { fetchLiveFeeds } from '../gtfs/services/gtfsRealtimeFetcher.js';
 import { normalizeTrains } from '../gtfs/services/trainNormalizer.js';
 import { base44 } from '../../src/api/base44Client.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const POLL_INTERVAL_MS = 30000; // 30 seconds
 
@@ -39,16 +45,54 @@ async function syncToBase44(trains) {
       }
     }
 
-    // Optional: Delete trains from Base44 that are no longer active
-    // We can do this periodically to keep the DB clean
+    // Delete trains from Base44 that are no longer active (or old simulated ones)
     for (const [tNum, id] of existingMap.entries()) {
       if (!activeTrainNumbers.has(tNum)) {
         await base44.entities.Train.delete(id);
+        console.log('[Worker] Deleted stale train record:', tNum);
       }
     }
   } catch (error) {
     console.error('Failed to sync snapshot to Base44:', error.message);
   }
+}
+
+async function generateShapesJson() {
+  const { shapesById, routesById, tripsById } = getStaticData();
+  
+  // Find which shapes belong to which routes
+  const shapeToRoute = new Map();
+  for (const trip of tripsById.values()) {
+    if (trip.shape_id && trip.route_id) {
+      shapeToRoute.set(trip.shape_id, trip.route_id);
+    }
+  }
+
+  const outputShapes = {};
+  
+  for (const [shapeId, points] of shapesById.entries()) {
+    const routeId = shapeToRoute.get(shapeId);
+    if (!routeId) continue;
+    
+    const routeInfo = routesById.get(routeId);
+    const color = routeInfo ? routeInfo.color : '#3b9eff';
+
+    // Simplify points (keep 1 in 5 points to reduce file size, or distance-based)
+    const simplified = [];
+    for (let i = 0; i < points.length; i += 5) {
+      simplified.push([points[i].lat, points[i].lon]);
+    }
+    // Always include the last point to close the segment
+    if (points.length > 0) {
+      simplified.push([points[points.length-1].lat, points[points.length-1].lon]);
+    }
+
+    outputShapes[shapeId] = { color, path: simplified };
+  }
+
+  const outputPath = path.join(__dirname, '../../public/shapes.json');
+  fs.writeFileSync(outputPath, JSON.stringify(outputShapes));
+  console.log('[Worker] Wrote simplified shapes.json (' + Object.keys(outputShapes).length + ' shapes) to public directory.');
 }
 
 async function runPoller() {
@@ -57,6 +101,7 @@ async function runPoller() {
   // 1. Load static GTFS first (blocks until complete)
   try {
     await loadStaticGtfs();
+    await generateShapesJson(); // Export shapes for frontend map
   } catch (err) {
     console.error('Failed to load static GTFS. Worker cannot start.', err);
     process.exit(1);

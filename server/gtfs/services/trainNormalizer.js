@@ -77,7 +77,7 @@ export function normalizeTrains(allEntities) {
     const routeName = routeInfo ? routeInfo.name : routeId;
 
     trains.push({
-      train_number: routeId + '-' + tripId.substring(tripId.length - 4),
+      train_number: tripId, // Use full tripId to guarantee uniqueness and prevent marker jumping
       name: routeName + ' Train' + directionStr,
       trip_id: tripId,
       route_id: routeId,
