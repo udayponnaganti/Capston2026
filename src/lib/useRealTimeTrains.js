@@ -1,28 +1,54 @@
 /**
  * useRealTimeTrains.js
- * React hook for real-time train data.
+ * React hook for real-time train data with 3-tier priority fallback:
  *
- * Flow:
- *  1. On mount: seed backend with initial simulation state (create all 12 trains)
- *  2. Every 3s: update backend with new simulation tick (positions, speed, occupancy, etc.)
- *  3. Every 3s: fetch fresh data from backend → return to components
- *  4. If backend unavailable: fall back to local simulation silently
+ *  Priority 1 — MTA Live (real NYC subway delay/status via /api/mta-feed)
+ *  Priority 2 — Base44 backend (existing API)
+ *  Priority 3 — Local simulation (offline fallback)
+ *
+ * The simulation always drives lat/lng for smooth map animation.
+ * MTA overrides delay_minutes, status, and type on matching trains.
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { base44 } from '@/api/base44Client';
 import { simulateTrainStates } from './trainSimulation';
+import { useMtaTrains } from './useMtaTrains';
 
 const TICK_MS = 3000; // push & pull every 3 seconds
 
 // module-level cache so multiple component instances share the same ID map
 const idCache = {}; // train_number → backend record id
-let seeded = false; // has initial seed been done?
+let seeded = false;
+
+/**
+ * Merge MTA live data onto a simulated train array.
+ * Simulation drives positions; MTA drives delay/status/type.
+ */
+function applyMtaOverrides(simTrains, mtaTrains) {
+  if (!mtaTrains || mtaTrains.length === 0) return simTrains;
+  return simTrains.map((sim, idx) => {
+    const mta = mtaTrains[idx % mtaTrains.length];
+    if (!mta) return sim;
+    return {
+      ...sim,
+      delay_minutes: mta.delay_minutes ?? sim.delay_minutes,
+      status:        mta.delay_minutes > 0 ? 'delayed' : sim.status,
+      mta_route_id:  mta.mta_route_id,
+      mta_trip_id:   mta.mta_trip_id,
+      // Only override type if MTA has a valid one
+      type: mta.type ?? sim.type,
+    };
+  });
+}
 
 export function useRealTimeTrains() {
-  const [trains, setTrains]       = useState(() => simulateTrainStates(0));
-  const [syncStatus, setSyncStatus] = useState('connecting'); // 'live' | 'offline' | 'connecting'
+  const [trains, setTrains]         = useState(() => simulateTrainStates(0));
+  const [syncStatus, setSyncStatus] = useState('connecting'); // 'mta-live' | 'live' | 'offline' | 'connecting'
   const tickRef = useRef(0);
+
+  // ── MTA hook (priority-1 source) ────────────────────────────────────────────
+  const { mtaTrains, mtaStatus } = useMtaTrains();
 
   useEffect(() => {
     let alive = true;
@@ -49,20 +75,17 @@ export function useRealTimeTrains() {
       type:              t.type,
     });
 
-    /** Seed backend: create all 12 train records if not yet done */
-    const seed = async (trains) => {
+    /** Seed backend: create all train records if not yet done */
+    const seed = async (simTrains) => {
       if (seeded) return;
       seeded = true;
       try {
-        // Fetch any existing records to populate idCache
         const existing = await base44.entities.Train.list(null, 30);
         if (existing?.length > 0) {
           existing.forEach(r => { idCache[r.train_number] = r.id; });
         }
-
-        // Create records for trains not yet in backend
         await Promise.allSettled(
-          trains.map(async (t) => {
+          simTrains.map(async (t) => {
             if (!idCache[t.train_number]) {
               try {
                 const created = await base44.entities.Train.create(buildPayload(t));
@@ -71,61 +94,65 @@ export function useRealTimeTrains() {
             }
           })
         );
-      } catch { seeded = false; /* retry next cycle */ }
+      } catch { seeded = false; }
     };
 
     /** Push updated states to backend */
-    const push = async (trains) => {
+    const push = async (simTrains) => {
       await Promise.allSettled(
-        trains.map(async (t) => {
-          const payload = buildPayload(t);
+        simTrains.map(async (t) => {
           try {
             if (idCache[t.train_number]) {
-              await base44.entities.Train.update(idCache[t.train_number], payload);
+              await base44.entities.Train.update(idCache[t.train_number], buildPayload(t));
             } else {
-              const created = await base44.entities.Train.create(payload);
+              const created = await base44.entities.Train.create(buildPayload(t));
               if (created?.id) idCache[t.train_number] = created.id;
             }
-          } catch { /* ignore individual failures */ }
+          } catch { /* ignore */ }
         })
       );
     };
 
-    /** Fetch current state from backend → use as source of truth */
+    /** Fetch from backend */
     const pull = async () => {
       const records = await base44.entities.Train.list(null, 30);
       if (records?.length > 0) return records;
       return null;
     };
 
-    /** Main tick: simulate → push → pull → update UI */
+    /** Main tick */
     const tick = async () => {
       if (!alive) return;
       tickRef.current += 1;
       const simulated = simulateTrainStates(tickRef.current);
 
-      // Always show local sim immediately for smooth UI
+      // ── Priority 1: MTA live data ──────────────────────────────────────────
+      if (mtaStatus === 'live' && mtaTrains?.length > 0) {
+        const merged = applyMtaOverrides(simulated, mtaTrains);
+        if (alive) {
+          setTrains(merged);
+          setSyncStatus('mta-live');
+        }
+        // Still push to backend for persistence (best-effort, non-blocking)
+        if (!seeded) seed(merged).catch(() => {});
+        push(merged).catch(() => {});
+        return;
+      }
+
+      // ── Priority 2: Base44 backend ─────────────────────────────────────────
+      // Show sim immediately for smooth UI
       if (alive) setTrains(simulated);
 
       try {
-        // Seed on first tick
         if (!seeded) await seed(simulated);
-
-        // Push new state to backend
         await push(simulated);
-
-        // Pull back from backend (API is now source of truth)
         const apiTrains = await pull();
         if (alive && apiTrains?.length > 0) {
-          // Merge API data with sim data:
-          // API has persisted IDs + any manual edits;
-          // sim has smooth interpolated positions
           const merged = apiTrains.map(apiTrain => {
             const sim = simulated.find(s => s.train_number === apiTrain.train_number);
             return {
-              ...sim,         // smooth positions from simulation
-              ...apiTrain,    // override with backend values
-              // Keep smooth lat/lng from simulation for map animation
+              ...sim,
+              ...apiTrain,
               latitude:  sim ? sim.latitude  : apiTrain.latitude,
               longitude: sim ? sim.longitude : apiTrain.longitude,
             };
@@ -133,17 +160,16 @@ export function useRealTimeTrains() {
           if (alive) setTrains(merged);
           if (alive) setSyncStatus('live');
         }
-      } catch (e) {
-        // Backend unreachable — keep using local sim
+      } catch {
+        // ── Priority 3: Local simulation only ──────────────────────────────
         if (alive) setSyncStatus('offline');
       }
     };
 
-    // Run immediately on mount then every TICK_MS
     tick();
     const interval = setInterval(tick, TICK_MS);
     return () => { alive = false; clearInterval(interval); };
-  }, []);
+  }, [mtaTrains, mtaStatus]); // re-run whenever MTA data changes
 
   return { trains, syncStatus };
 }

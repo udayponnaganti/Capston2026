@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { 
   LayoutDashboard, Map, Train, AlertTriangle, GitBranch, 
-  BarChart3, Users, ChevronLeft, ChevronRight, Zap, ExternalLink
+  BarChart3, Users, ChevronLeft, ChevronRight, Zap, ExternalLink,
+  Radio, Wifi, WifiOff
 } from 'lucide-react';
+import { useRealTimeTrains } from '@/lib/useRealTimeTrains';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
@@ -15,9 +17,47 @@ const navItems = [
   { icon: Users, label: 'Passenger View', path: '/passenger' },
 ];
 
+// Sync badge config keyed by syncStatus value
+const SYNC_BADGE = {
+  'mta-live': {
+    label: 'MTA Live',
+    icon: Radio,
+    dot: 'bg-emerald-400',
+    text: 'text-emerald-400',
+    bg: 'bg-emerald-500/10 border-emerald-500/30',
+    pulse: true,
+  },
+  'live': {
+    label: 'API Live',
+    icon: Wifi,
+    dot: 'bg-blue-400',
+    text: 'text-blue-400',
+    bg: 'bg-blue-500/10 border-blue-500/30',
+    pulse: false,
+  },
+  'connecting': {
+    label: 'Connecting',
+    icon: Wifi,
+    dot: 'bg-yellow-400',
+    text: 'text-yellow-400',
+    bg: 'bg-yellow-500/10 border-yellow-500/30',
+    pulse: true,
+  },
+  'offline': {
+    label: 'Simulation',
+    icon: WifiOff,
+    dot: 'bg-slate-400',
+    text: 'text-slate-400',
+    bg: 'bg-slate-500/10 border-slate-500/30',
+    pulse: false,
+  },
+};
+
 export default function AdminLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
+  const { syncStatus } = useRealTimeTrains();
+  const badge = SYNC_BADGE[syncStatus] ?? SYNC_BADGE['offline'];
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -60,7 +100,22 @@ export default function AdminLayout() {
         </nav>
 
         {/* Bottom */}
-        <div className="px-2 pb-4 border-t border-border pt-3">
+        <div className="px-2 pb-4 border-t border-border pt-3 space-y-2">
+          {/* Live data source badge */}
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${badge.bg}`}>
+            <div className="relative flex-shrink-0">
+              <div className={`w-2 h-2 rounded-full ${badge.dot}`} />
+              {badge.pulse && (
+                <div className={`absolute inset-0 w-2 h-2 rounded-full ${badge.dot} animate-ping opacity-60`} />
+              )}
+            </div>
+            {!collapsed && (
+              <span className={`text-[10px] font-semibold tracking-wide ${badge.text}`}>
+                {badge.label}
+              </span>
+            )}
+          </div>
+
           <a href="/passenger-portal" target="_blank"
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-muted-foreground hover:text-accent hover:bg-accent/10 transition-all">
             <ExternalLink className="w-4 h-4 flex-shrink-0" />
