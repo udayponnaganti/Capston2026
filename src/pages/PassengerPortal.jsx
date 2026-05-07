@@ -103,14 +103,25 @@ export default function PassengerPortal() {
     const refresh = () => {
       const fresh = getPassengerNotifications();
       setNotifications(fresh);
-      // Show banner for first unread critical/warning
       const unread = fresh.filter(n => !n.read);
       if (unread.length > 0) setBannerNotif(unread[0]);
     };
+    // Same-tab: custom event fired immediately when admin triggers
     window.addEventListener('railtwin_notifications', refresh);
-    // Also poll every 10s in case portal was opened in another tab
-    const poll = setInterval(refresh, 10000);
-    return () => { window.removeEventListener('railtwin_notifications', refresh); clearInterval(poll); };
+    // Cross-tab: storage event fires when another tab writes to localStorage
+    const onStorage = (e) => {
+      if (e.key === 'railtwin_notif_trigger' || e.key === 'railtwin_passenger_notifications') {
+        refresh();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    // Fallback poll every 5s
+    const poll = setInterval(refresh, 5000);
+    return () => {
+      window.removeEventListener('railtwin_notifications', refresh);
+      window.removeEventListener('storage', onStorage);
+      clearInterval(poll);
+    };
   }, []);
 
   // ── Read alerts from localStorage (written by admin Alerts page) ────────────

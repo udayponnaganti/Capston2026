@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
-import { Home, Search, Map, AlertTriangle, Star, ArrowRight, Users, XCircle, Info, Zap } from 'lucide-react';
+import { Home, Search, Map, AlertTriangle, Star, ArrowRight, Users,
+  XCircle, Info, Zap, Bell, BellRing, CheckCircle2, X } from 'lucide-react';
 import { simulateTrainStates, getNetworkStats, STATIONS } from '@/lib/trainSimulation';
 import moment from 'moment';
+import { getPassengerNotifications, markNotificationRead, clearPassengerNotifications } from '@/lib/passengerNotifications';
 
 const TABS = [
-  { id: 'home',      label: 'Home',       icon: Home },
-  { id: 'track',     label: 'Track',      icon: Search },
-  { id: 'journey',   label: 'Journey',    icon: Map },
-  { id: 'alerts',    label: 'Alerts',     icon: AlertTriangle },
-  { id: 'favorites', label: 'Favorites',  icon: Star },
+  { id: 'home',          label: 'Home',    icon: Home },
+  { id: 'track',         label: 'Track',   icon: Search },
+  { id: 'journey',       label: 'Journey', icon: Map },
+  { id: 'alerts',        label: 'Alerts',  icon: AlertTriangle },
+  { id: 'notifications', label: 'Notify',  icon: Bell },
+  { id: 'favorites',     label: 'Favorites', icon: Star },
 ];
 
 function StatusBadge({ status }) {
@@ -32,6 +35,8 @@ export default function PassengerView() {
   const [tab, setTab] = useState('home');
   const [trains, setTrains] = useState(() => simulateTrainStates(0));
   const [alerts, setAlerts] = useState([]);
+  const [notifications, setNotifications] = useState(() => getPassengerNotifications());
+  const [bannerNotif, setBannerNotif] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [favorites, setFavorites] = useState(() => {
     try { return JSON.parse(localStorage.getItem('railtwin_favorites') || '[]'); } catch { return []; }
@@ -44,6 +49,27 @@ export default function PassengerView() {
   useEffect(() => {
     const interval = setInterval(() => setTrains(simulateTrainStates(Date.now() % 1000)), 3000);
     return () => clearInterval(interval);
+  }, []);
+
+  // ── Cross-tab + same-tab notification listener ────────────────────────────────
+  useEffect(() => {
+    const refresh = () => {
+      const fresh = getPassengerNotifications();
+      setNotifications(fresh);
+      const unread = fresh.filter(n => !n.read);
+      if (unread.length > 0) setBannerNotif(unread[0]);
+    };
+    window.addEventListener('railtwin_notifications', refresh);
+    const onStorage = (e) => {
+      if (e.key === 'railtwin_notif_trigger' || e.key === 'railtwin_passenger_notifications') refresh();
+    };
+    window.addEventListener('storage', onStorage);
+    const poll = setInterval(refresh, 5000);
+    return () => {
+      window.removeEventListener('railtwin_notifications', refresh);
+      window.removeEventListener('storage', onStorage);
+      clearInterval(poll);
+    };
   }, []);
 
   // Load alerts — forceRefresh=true skips localStorage and regenerates from live sim
@@ -109,6 +135,17 @@ export default function PassengerView() {
 
   const stats = getNetworkStats(trains);
   const criticalCount = alerts.filter(a => a.severity === 'critical').length;
+  const unreadNotifCount = notifications.filter(n => !n.read).length;
+
+  const dismissBanner = () => {
+    if (bannerNotif) { const u = markNotificationRead(bannerNotif.id); setNotifications(u); }
+    setBannerNotif(null);
+  };
+  const markAllRead = () => {
+    const updated = notifications.map(n => ({ ...n, read: true }));
+    try { localStorage.setItem('railtwin_passenger_notifications', JSON.stringify(updated)); } catch (_) {}
+    setNotifications(updated); setBannerNotif(null);
+  };
   const searchResults = search ? trains.filter(t =>
     t.train_number.toLowerCase().includes(search.toLowerCase()) ||
     t.name.toLowerCase().includes(search.toLowerCase())
@@ -135,8 +172,35 @@ export default function PassengerView() {
             <div className="w-2 h-2 rounded-full bg-accent animate-live-pulse" />
             <span className="text-sm font-bold text-foreground">RailTwin AI</span>
           </div>
-          <span className="text-xs font-mono text-muted-foreground">{moment().format('HH:mm')} · Live</span>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setTab('notifications')} className="relative p-1 hover:bg-secondary rounded-lg transition-colors">
+              {unreadNotifCount > 0 ? <BellRing className="w-4 h-4 text-primary" /> : <Bell className="w-4 h-4 text-muted-foreground" />}
+              {unreadNotifCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-[9px] text-white font-bold flex items-center justify-center">{unreadNotifCount}</span>
+              )}
+            </button>
+            <span className="text-xs font-mono text-muted-foreground">{moment().format('HH:mm')} · Live</span>
+          </div>
         </div>
+
+        {/* Live notification banner */}
+        {bannerNotif && tab !== 'notifications' && (
+          <div className="mx-3 mt-2">
+            <div className="rounded-xl border px-3 py-2.5 flex items-start gap-2.5 shadow-lg"
+              style={{ background: 'hsl(222,41%,12%)', borderColor: bannerNotif.severity === 'critical' ? 'hsla(0,72%,51%,0.5)' : 'hsla(211,100%,62%,0.4)' }}>
+              <BellRing className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: bannerNotif.severity === 'critical' ? 'hsl(0,72%,65%)' : 'hsl(211,100%,72%)' }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-foreground">{bannerNotif.title}</p>
+                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{bannerNotif.message}</p>
+              </div>
+              <div className="flex gap-1 flex-shrink-0">
+                <button onClick={() => { setTab('notifications'); dismissBanner(); }}
+                  className="text-xs px-2 py-0.5 rounded font-medium" style={{ background: 'hsla(211,100%,62%,0.15)', color: 'hsl(211,100%,72%)' }}>View</button>
+                <button onClick={dismissBanner} className="p-0.5 hover:bg-secondary rounded"><X className="w-3 h-3 text-muted-foreground" /></button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-auto pb-16">
@@ -433,19 +497,20 @@ export default function PassengerView() {
         {/* Bottom nav — identical to PassengerPortal */}
         <div className="border-t border-border bg-card flex flex-shrink-0">
           {TABS.map(({ id, label, icon: Icon }) => {
-            const isAlerts = id === 'alerts' && criticalCount > 0;
+            const alertBadge = id === 'alerts' && criticalCount > 0;
+            const notifBadge = id === 'notifications' && unreadNotifCount > 0;
             return (
               <button key={id} onClick={() => setTab(id)}
                 className={`flex-1 flex flex-col items-center py-3 transition-all relative ${tab === id ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
                 <div className="relative">
                   <Icon className="w-5 h-5" />
-                  {isAlerts && (
+                  {(alertBadge || notifBadge) && (
                     <span className="absolute -top-1 -right-1 min-w-[14px] h-3.5 px-0.5 rounded-full bg-red-500 text-[9px] text-white font-bold flex items-center justify-center">
-                      {criticalCount}
+                      {alertBadge ? criticalCount : unreadNotifCount}
                     </span>
                   )}
                 </div>
-                <span className="text-xs mt-0.5">{label}</span>
+                <span className="text-[10px] mt-0.5">{label}</span>
                 {tab === id && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-primary rounded-full" />}
               </button>
             );

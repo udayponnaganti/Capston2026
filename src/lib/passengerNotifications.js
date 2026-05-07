@@ -107,7 +107,10 @@ export function savePassengerNotifications(newNotifications) {
     const existing = getPassengerNotifications();
     const merged   = [...newNotifications, ...existing].slice(0, MAX_STORED);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-    // Dispatch custom event so open PassengerPortal reacts immediately
+    // Write a trigger timestamp — this fires the 'storage' event in OTHER tabs
+    // and is also picked up by same-tab polling
+    localStorage.setItem('railtwin_notif_trigger', Date.now().toString());
+    // Also fire custom event for same-tab listeners
     window.dispatchEvent(new CustomEvent('railtwin_notifications', { detail: { count: newNotifications.length } }));
     return merged;
   } catch (_) {
