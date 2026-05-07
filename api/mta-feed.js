@@ -136,9 +136,15 @@ function normalizeTrains(allEntities) {
     const passengers = Math.round(capacity * occFactor);
     const speed = data.vehicle.position.speed ? Math.round(data.vehicle.position.speed * 3.6) : (hash % 40 + 20); // convert m/s to km/h or fake it
 
+    // Extract direction from tripId (ends in N or S typically)
+    const directionChar = tripId.match(/\.\.([NS])/)?.[1];
+    let directionStr = '';
+    if (directionChar === 'N') directionStr = ' (Uptown)';
+    else if (directionChar === 'S') directionStr = ' (Downtown)';
+
     trains.push({
       train_number: \`\${routeId}-\${tripId.substring(tripId.length - 4)}\`,
-      name: \`\${routeId} Train\`,
+      name: \`\${routeId} Train\${directionStr}\`,
       mta_trip_id: tripId,
       mta_route_id: routeId,
       latitude: lat,

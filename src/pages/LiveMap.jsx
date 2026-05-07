@@ -30,6 +30,16 @@ const ROUTE_LINES = [
   ['Metro Square', 'Union Terminal'],
 ];
 
+const REAL_MTA_STATIONS = [
+  { code: 'TSQ', name: 'Times Sq-42 St', latitude: 40.7552, longitude: -73.9874, platforms: 12, zone: 'Manhattan' },
+  { code: 'PEN', name: '34 St-Penn Station', latitude: 40.7503, longitude: -73.9923, platforms: 6, zone: 'Manhattan' },
+  { code: 'GC', name: 'Grand Central-42 St', latitude: 40.7527, longitude: -73.9772, platforms: 8, zone: 'Manhattan' },
+  { code: 'FUL', name: 'Fulton St', latitude: 40.7103, longitude: -74.0087, platforms: 8, zone: 'Manhattan' },
+  { code: 'ATL', name: 'Atlantic Av-Barclays', latitude: 40.6836, longitude: -73.9788, platforms: 6, zone: 'Brooklyn' },
+  { code: 'USQ', name: '14 St-Union Sq', latitude: 40.7346, longitude: -73.9904, platforms: 6, zone: 'Manhattan' },
+  { code: 'W4', name: 'W 4 St-Wash Sq', latitude: 40.7323, longitude: -74.0004, platforms: 6, zone: 'Manhattan' },
+];
+
 function lerp(a, b, t) { return a + (b - a) * t; }
 
 function getStationPos(name) {
@@ -181,15 +191,15 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
 
 // ── Station layer (static) ─────────────────────────────────────────────────────
 function StationLayer({ trains, isMtaLive }) {
-  if (isMtaLive) return null; // Hide fictional layout when using real MTA map
-
   const arrivingStations = new Set(
     trains.filter(t => t.status === 'arrived').map(t => t.current_station)
   );
 
+  const stationsToRender = isMtaLive ? REAL_MTA_STATIONS : STATIONS;
+
   return (
     <>
-      {STATIONS.map(station => (
+      {stationsToRender.map(station => (
         <Marker
           key={station.code}
           position={[station.latitude, station.longitude]}
@@ -204,7 +214,7 @@ function StationLayer({ trains, isMtaLive }) {
           </Popup>
         </Marker>
       ))}
-      {ROUTE_LINES.map(([from, to], i) => {
+      {!isMtaLive && ROUTE_LINES.map(([from, to], i) => {
         const a = getStationPos(from);
         const b = getStationPos(to);
         if (!a || !b) return null;
