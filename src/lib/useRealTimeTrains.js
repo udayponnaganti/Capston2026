@@ -35,8 +35,10 @@ export function useRealTimeTrains() {
             // Unpack next stop coords packed into route[2], route[3] by the backend worker
             // route = [currentStation, nextStation, nextLat, nextLng]
             const routeArr     = Array.isArray(t.route) ? t.route : [];
-            let next_latitude  = typeof routeArr[2] === 'number' ? routeArr[2] : null;
-            let next_longitude = typeof routeArr[3] === 'number' ? routeArr[3] : null;
+            const parsedLat    = parseFloat(routeArr[2]);
+            const parsedLng    = parseFloat(routeArr[3]);
+            let next_latitude  = isNaN(parsedLat) ? null : parsedLat;
+            let next_longitude = isNaN(parsedLng) ? null : parsedLng;
 
             // If backend didn't provide next stop coords, try to extrapolate from consecutive polls
             if (!next_latitude && prev && t.latitude != null && t.longitude != null) {
