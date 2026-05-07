@@ -258,7 +258,7 @@ export default function LiveMap() {
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           attribution='&copy; <a href="https://carto.com">CARTO</a>'
         />
-        <StationLayer trains={trains} isMtaLive={syncStatus === 'mta-live'} />
+        <StationLayer trains={trains} isMtaLive={syncStatus === 'live'} />
         <LiveTrainLayer trainsRef={trainsRef} selectedRef={selectedRef} onSelect={handleSelect} />
       </MapContainer>
 
@@ -269,16 +269,13 @@ export default function LiveMap() {
           <span className="text-xs font-mono text-foreground">LIVE · {trains.length} trains</span>
         </div>
         <div className={`glass rounded-full px-3 py-1.5 flex items-center gap-1.5 text-xs font-mono ${
-          syncStatus === 'mta-live' ? 'text-emerald-400' :
           syncStatus === 'live'     ? 'text-emerald-400' :
           syncStatus === 'offline'  ? 'text-yellow-400'  : 'text-blue-400'
         }`}>
-          {syncStatus === 'mta-live' ? <Radio className="w-3 h-3" /> :
-           syncStatus === 'live'     ? <Wifi className="w-3 h-3" /> :
+          {syncStatus === 'live'     ? <Wifi className="w-3 h-3" /> :
            syncStatus === 'offline'  ? <WifiOff className="w-3 h-3" /> :
                                        <span className="w-3 h-3 border border-current rounded-full animate-spin inline-block" />}
-          {syncStatus === 'mta-live' ? 'MTA Live' :
-           syncStatus === 'live'     ? 'API Live' :
+          {syncStatus === 'live'     ? 'GTFS-RT Live' :
            syncStatus === 'offline'  ? 'Local Sim' : 'Connecting...'}
         </div>
       </div>
@@ -394,7 +391,7 @@ export default function LiveMap() {
           </div>
 
           {/* Occupancy bar */}
-          {selectedTrain.type !== 'freight' && selectedTrain.capacity > 0 && (
+          {selectedTrain.capacity && (
             <div>
               <div className="flex justify-between text-xs text-muted-foreground mb-1">
                 <span className="flex items-center gap-1"><Users className="w-3 h-3" /> Occupancy</span>
@@ -405,6 +402,14 @@ export default function LiveMap() {
                   className={`h-2 rounded-full transition-all duration-1000 ${occupancy > 85 ? 'bg-destructive' : occupancy > 60 ? 'bg-warning' : 'bg-accent'}`}
                   style={{ width: `${Math.min(occupancy, 100)}%` }}
                 />
+              </div>
+            </div>
+          )}
+          {!selectedTrain.capacity && (
+            <div>
+              <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                <span className="flex items-center gap-1"><Users className="w-3 h-3" /> Occupancy</span>
+                <span className="font-mono">N/A</span>
               </div>
             </div>
           )}

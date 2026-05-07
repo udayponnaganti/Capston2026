@@ -3,7 +3,8 @@ import TrainStatusBadge from './TrainStatusBadge';
 import TrainTypeIcon from './TrainTypeIcon';
 
 export default function TrainStatusCard({ train, compact }) {
-  const occupancy = train.capacity > 0 ? Math.round((train.passenger_count / train.capacity) * 100) : 0;
+  const hasOccupancy = train.capacity && train.occupancy !== null;
+  const occupancy = hasOccupancy ? Math.round((train.passenger_count / train.capacity) * 100) : null;
   const occupancyColor = occupancy > 85 ? 'bg-destructive' : occupancy > 60 ? 'bg-warning' : 'bg-accent';
 
   if (compact) {
@@ -69,7 +70,7 @@ export default function TrainStatusCard({ train, compact }) {
         </div>
       </div>
 
-      {train.type !== 'freight' && train.capacity > 0 && (
+      {hasOccupancy && (
         <div>
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -80,6 +81,17 @@ export default function TrainStatusCard({ train, compact }) {
           </div>
           <div className="w-full h-1.5 bg-secondary rounded-full">
             <div className={`h-1.5 rounded-full transition-all ${occupancyColor}`} style={{ width: `${Math.min(occupancy, 100)}%` }} />
+          </div>
+        </div>
+      )}
+      {!hasOccupancy && train.type !== 'freight' && (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Users className="w-3 h-3" />
+              <span>Occupancy</span>
+            </div>
+            <span className="text-xs font-mono text-muted-foreground">N/A</span>
           </div>
         </div>
       )}
