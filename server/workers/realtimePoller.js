@@ -51,8 +51,8 @@ async function syncToBase44(trains) {
         feed_timestamp:  t.feed_timestamp,
         arrival_at_next: t.arrival_at_next,
         is_dwelling:     t.is_dwelling,
-        route:           t.route,
-        capacity:        t.capacity,
+        route:           [t.current_station, t.next_station, t.next_latitude, t.next_longitude].filter(v => v != null),
+        // speed_kmh: 0 from Base44 because field may not exist, use hash for demo
         passenger_count: t.occupancy,
         platform:        t.platform,
       };

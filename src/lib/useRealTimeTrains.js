@@ -31,21 +31,31 @@ export function useRealTimeTrains() {
 
           const enriched = records.map(t => {
             const prev = prevSnapshot.current[t.train_number];
-            let next_latitude  = null;
-            let next_longitude = null;
-            let computed_speed = t.speed_kmh || 0;
 
-            if (prev && t.latitude != null && t.longitude != null) {
+            // Unpack next stop coords packed into route[2], route[3] by the backend worker
+            // route = [currentStation, nextStation, nextLat, nextLng]
+            const routeArr     = Array.isArray(t.route) ? t.route : [];
+            let next_latitude  = typeof routeArr[2] === 'number' ? routeArr[2] : null;
+            let next_longitude = typeof routeArr[3] === 'number' ? routeArr[3] : null;
+
+            // If backend didn't provide next stop coords, try to extrapolate from consecutive polls
+            if (!next_latitude && prev && t.latitude != null && t.longitude != null) {
               const dLat = t.latitude  - prev.lat;
               const dLng = t.longitude - prev.lng;
               const moved = Math.abs(dLat) > 0.00003 || Math.abs(dLng) > 0.00003;
-
               if (moved) {
-                // Project ahead: next pos = current + delta (extrapolate direction)
                 next_latitude  = t.latitude  + dLat * 3;
                 next_longitude = t.longitude + dLng * 3;
+              }
+            }
 
-                // Compute speed from position delta + elapsed time
+            // Compute speed from coordinate delta
+            let computed_speed = t.speed_kmh || 0;
+            if (prev && t.latitude != null) {
+              const dLat = t.latitude  - prev.lat;
+              const dLng = t.longitude - prev.lng;
+              const moved = Math.abs(dLat) > 0.00003 || Math.abs(dLng) > 0.00003;
+              if (moved) {
                 const elapsedHrs = (nowMs - prev.ts) / 3_600_000;
                 if (elapsedHrs > 0) {
                   const R = 6371;
