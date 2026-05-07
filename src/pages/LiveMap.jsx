@@ -532,7 +532,7 @@ export default function LiveMap() {
                       <div className="w-2 h-2 rounded-full" style={{ background: STATUS_COLORS[t.status]?.fill || '#fff' }} />
                       <div>
                         <div className="text-xs font-bold text-foreground truncate max-w-[100px]">{t.train_number}</div>
-                        <div className="text-[10px] text-muted-foreground">{t.delay_minutes > 0 ? \`+\${t.delay_minutes}m delay\` : 'On time'}</div>
+                        <div className="text-[10px] text-muted-foreground">{t.delay_minutes > 0 ? `+${t.delay_minutes}m delay` : 'On time'}</div>
                       </div>
                     </div>
                     <div className="text-xs font-mono">{t.speed_kmh || 45} km/h</div>
