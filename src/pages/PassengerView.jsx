@@ -473,6 +473,86 @@ export default function PassengerView() {
               </div>
             )}
 
+            {/* ── NOTIFICATIONS ───────────────────────────────── */}
+            {tab === 'notifications' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-bold text-foreground">Passenger Notifications</h2>
+                  <div className="flex gap-2">
+                    {notifications.length > 0 && (
+                      <button onClick={markAllRead}
+                        className="text-xs text-primary flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/10 hover:bg-primary/20 transition-all">
+                        <CheckCircle2 className="w-3 h-3" /> Mark all read
+                      </button>
+                    )}
+                    {notifications.length > 0 && (
+                      <button onClick={() => { clearPassengerNotifications(); setNotifications([]); }}
+                        className="text-xs text-muted-foreground flex items-center gap-1 px-2 py-1 rounded-lg bg-secondary hover:bg-secondary/80 transition-all">
+                        <X className="w-3 h-3" /> Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {notifications.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Bell className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                    <p className="text-sm font-medium">No notifications yet</p>
+                    <p className="text-xs mt-1 opacity-70">Trigger a Response Protocol from the Alerts page to send notifications here.</p>
+                  </div>
+                ) : notifications.map(n => {
+                  const tc = {
+                    eta:      { bg: 'bg-yellow-500/5',  border: 'border-yellow-500/20', icon: '🕐', lbl: 'text-yellow-400' },
+                    platform: { bg: 'bg-blue-500/5',    border: 'border-blue-500/20',   icon: '🚉', lbl: 'text-blue-400' },
+                    service:  { bg: 'bg-purple-500/5',  border: 'border-purple-500/20', icon: '🔄', lbl: 'text-purple-400' },
+                    boarding: { bg: 'bg-orange-500/5',  border: 'border-orange-500/20', icon: '👥', lbl: 'text-orange-400' },
+                    safety:   { bg: 'bg-red-500/5',     border: 'border-red-500/20',    icon: '⚠️', lbl: 'text-red-400' },
+                    info:     { bg: 'bg-blue-500/5',    border: 'border-blue-500/20',   icon: '🧑‍✈️', lbl: 'text-blue-400' },
+                    general:  { bg: 'bg-secondary/50',  border: 'border-border',        icon: '📢', lbl: 'text-foreground' },
+                  }[n.type] || { bg: 'bg-secondary/50', border: 'border-border', icon: '📢', lbl: 'text-foreground' };
+                  return (
+                    <div key={n.id}
+                      onClick={() => {
+                        if (!n.read) {
+                          try {
+                            const updated = markNotificationRead(n.id);
+                            if (updated && updated.length > 0) setNotifications(updated);
+                            else setNotifications(prev => prev.map(p => p.id === n.id ? { ...p, read: true } : p));
+                          } catch (e) {
+                            setNotifications(prev => prev.map(p => p.id === n.id ? { ...p, read: true } : p));
+                          }
+                        }
+                      }}
+                      className={`rounded-2xl border p-4 cursor-pointer transition-all ${tc.bg} ${tc.border} ${n.read ? 'opacity-60' : ''}`}>
+                      <div className="flex items-start gap-3">
+                        <span className="text-xl flex-shrink-0">{tc.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-xs font-bold ${tc.lbl}`}>{n.title}</span>
+                            {!n.read && <span className="w-2 h-2 rounded-full bg-primary flex-shrink-0 animate-pulse" />}
+                          </div>
+                          <p className="text-xs text-foreground leading-relaxed">{n.message}</p>
+                          <div className="flex items-center gap-2 mt-2 flex-wrap">
+                            {n.train && <span className="text-xs font-mono text-primary">{n.train}</span>}
+                            {n.station && <span className="text-xs text-muted-foreground">· {n.station}</span>}
+                            {n.platform && (
+                              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                                Platform {n.platform}
+                              </span>
+                            )}
+                            <span className="text-xs text-muted-foreground ml-auto">{moment(n.ts).fromNow()}</span>
+                          </div>
+                          {n.alert_title && (
+                            <p className="text-xs text-muted-foreground/60 mt-1">Re: {n.alert_title}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* ── FAVORITES ────────────────────────────────────────── */}
             {tab === 'favorites' && (
               <div className="space-y-3">

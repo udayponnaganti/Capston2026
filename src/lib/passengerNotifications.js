@@ -140,6 +140,7 @@ export function markNotificationRead(notifId) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     return updated;
   } catch (_) {
-    return [];
+    // On error, return existing notifications unchanged (never wipe)
+    return getPassengerNotifications();
   }
 }

@@ -200,8 +200,10 @@ export default function PassengerPortal() {
 
   const dismissBanner = () => {
     if (bannerNotif) {
-      const updated = markNotificationRead(bannerNotif.id);
-      setNotifications(updated);
+      // Mark read in localStorage
+      markNotificationRead(bannerNotif.id);
+      // Update React state in-place (safe - never empties the list)
+      setNotifications(prev => prev.map(n => n.id === bannerNotif.id ? { ...n, read: true } : n));
     }
     setBannerNotif(null);
   };
