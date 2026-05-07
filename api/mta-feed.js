@@ -10,6 +10,9 @@ const MTA_FEEDS = [
   'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs',         // 1 2 3 4 5 6 7 S
   'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-ace',     // A C E
   'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-nqrw',    // N Q R W
+  'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-bdfm',    // B D F M
+  'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-g',       // G
+  'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-jz',      // J Z
 ];
 
 const ROUTE_TYPE_MAP = {
@@ -17,6 +20,8 @@ const ROUTE_TYPE_MAP = {
   '5': 'express', '6': 'local', '7': 'high_speed', 'S': 'local',
   'A': 'express', 'C': 'local', 'E': 'express',
   'N': 'express', 'Q': 'high_speed', 'R': 'local', 'W': 'local',
+  'B': 'express', 'D': 'express', 'F': 'express', 'M': 'local',
+  'G': 'local', 'J': 'express', 'Z': 'express'
 };
 
 // Simple pseudo-random generator for consistent simulated metrics per trip
