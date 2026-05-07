@@ -130,12 +130,12 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
         const lng = s.fromLng + (s.nextLng - s.fromLng) * t;
         marker.setLatLng([lat, lng]);
 
-        // When arrived, begin dwell then snap to next target
+        // When arrived, dwell then RE-QUEUE same target to keep animating
+        // until feed gives a new position. fromLat/Lng stay at feed position.
         if (rawT >= 1) {
-          s.fromLat    = s.nextLat;
-          s.fromLng    = s.nextLng;
-          s.dwellUntil = nowSecs + (s.isDwelling ? DWELL_SECS : 3);
-          // Clear target so we wait for next feed update
+          s.dwellUntil = nowSecs + (s.isDwelling ? DWELL_SECS : 5);
+          // Don't update fromLat/Lng here — keep the feed anchor unchanged
+          // Just clear nextLat so the tick loop can re-queue it
           s.nextLat = null;
           s.nextLng = null;
         }
@@ -178,7 +178,11 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
           markersRef.current[id] = marker;
 
           // Init physics state
+          // feedLat/feedLng = what the GTFS feed reported (never changes with animation)
+          // fromLat/fromLng = animation start point (stays at feedLat/feedLng)
           stateRef.current[id] = {
+            feedLat:    train.latitude,
+            feedLng:    train.longitude,
             fromLat:    train.latitude,
             fromLng:    train.longitude,
             nextLat:    train.next_latitude,
@@ -192,13 +196,14 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
         } else {
           const s = stateRef.current[id];
 
-          // ── Detect new position from feed ────────────────────────────────
-          const dLat = Math.abs(train.latitude  - s.fromLat);
-          const dLng = Math.abs(train.longitude - s.fromLng);
-          const hasMoved = dLat > 0.00005 || dLng > 0.00005;
+          // ── Detect REAL feed position change (compare against feedLat, not animation pos)
+          const feedMoved = Math.abs(train.latitude  - s.feedLat) > 0.00005 ||
+                            Math.abs(train.longitude - s.feedLng) > 0.00005;
 
-          if (hasMoved) {
-            // Snap from to new reported position, animate towards next
+          if (feedMoved) {
+            // Feed reported a new stop — snap anchor and restart animation
+            s.feedLat    = train.latitude;
+            s.feedLng    = train.longitude;
             s.fromLat    = train.latitude;
             s.fromLng    = train.longitude;
             s.nextLat    = train.next_latitude;
@@ -207,18 +212,16 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
             s.arrivalAt  = train.arrival_at_next;
             s.isDwelling = train.is_dwelling;
             s.stale      = isStale;
-            // If dwelling, override next target
-            if (train.is_dwelling) {
-              s.dwellUntil = nowSecs + DWELL_SECS;
-              s.nextLat    = null;
-              s.nextLng    = null;
-            }
+            s.dwellUntil = train.is_dwelling ? nowSecs + DWELL_SECS : null;
           } else if (s.nextLat == null && train.next_latitude) {
-            // Same reported position but we now have a next target: set it
-            s.nextLat   = train.next_latitude;
-            s.nextLng   = train.next_longitude;
+            // Animation finished dwell — re-queue the same next target to keep moving
+            // (train is still between same two stops per feed)
+            s.fromLat    = s.feedLat;          // reset anim start to feed anchor
+            s.fromLng    = s.feedLng;
+            s.nextLat    = train.next_latitude;
+            s.nextLng    = train.next_longitude;
             s.departedAt = nowSecs;
-            s.arrivalAt  = train.arrival_at_next;
+            s.arrivalAt  = train.arrival_at_next; // may be null — falls back to 45s window
           }
 
           s.stale = isStale;
