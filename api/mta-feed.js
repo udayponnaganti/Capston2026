@@ -5,17 +5,11 @@
 
 import GtfsRealtimeBindings from 'gtfs-realtime-bindings';
 
-// The 3 feeds we pull in parallel (covers lines 1-7, A/C/E, N/Q/R/W)
+// The feeds we pull in parallel
 const MTA_FEEDS = [
   'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs',         // 1 2 3 4 5 6 7 S
   'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-ace',     // A C E
   'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-nqrw',    // N Q R W
-];
-
-// Your 12 train numbers — we cycle MTA trips onto these consistently
-const TRAIN_NUMBERS = [
-  'EX-101', 'HS-202', 'LC-303', 'FR-404', 'EX-105', 'HS-206',
-  'LC-307', 'EX-109', 'HS-210', 'LC-311', 'FR-412', 'EX-113',
 ];
 
 const ROUTE_TYPE_MAP = {
@@ -25,14 +19,24 @@ const ROUTE_TYPE_MAP = {
   'N': 'express', 'Q': 'high_speed', 'R': 'local', 'W': 'local',
 };
 
+// Simple pseudo-random generator for consistent simulated metrics per trip
+function hashString(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
 /**
  * Fetch + decode a single MTA GTFS-RT feed.
- * Returns an array of TripUpdate entities or [] on failure.
+ * Returns an array of entities or [] on failure.
  */
 async function fetchFeed(url) {
   try {
     const res = await fetch(url, {
-      headers: { 'x-api-key': '' }, // no key needed, but header presence helps
+      headers: { 'x-api-key': '' },
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return [];
@@ -49,9 +53,9 @@ async function fetchFeed(url) {
 /**
  * Extract the delay in minutes from a TripUpdate entity.
  */
-function extractDelay(entity) {
+function extractDelay(tripUpdate) {
   try {
-    const su = entity.tripUpdate?.stopTimeUpdate;
+    const su = tripUpdate?.stopTimeUpdate;
     if (!su || su.length === 0) return 0;
     // Use the first stop update with a delay
     for (const s of su) {
@@ -63,43 +67,94 @@ function extractDelay(entity) {
 }
 
 /**
- * Map raw MTA entities onto your 12-train schema.
- * Cycles through entities so each of your 12 trains gets a real MTA trip.
+ * Normalizes all GTFS entities into a clean array of real trains
  */
-function mapToRailTwinTrains(allEntities) {
-  // Filter to only TripUpdate entities that have real data
-  const tripUpdates = allEntities.filter(e => e.tripUpdate?.trip);
+function normalizeTrains(allEntities) {
+  // Map to hold merged data by tripId
+  const tripMap = new Map();
 
-  const trains = TRAIN_NUMBERS.map((trainNumber, idx) => {
-    // Pick an MTA trip for this slot (cycle through available trips)
-    const entity = tripUpdates[idx % Math.max(tripUpdates.length, 1)];
-    const trip = entity?.tripUpdate?.trip;
-    const routeId = trip?.routeId ?? String(idx + 1);
-    const delayMins = entity ? extractDelay(entity) : 0;
+  // First pass: gather VehiclePositions
+  for (const entity of allEntities) {
+    if (entity.vehicle?.trip?.tripId) {
+      const tripId = entity.vehicle.trip.tripId;
+      tripMap.set(tripId, {
+        vehicle: entity.vehicle,
+        tripUpdate: null
+      });
+    }
+  }
+
+  // Second pass: gather TripUpdates and merge
+  for (const entity of allEntities) {
+    if (entity.tripUpdate?.trip?.tripId) {
+      const tripId = entity.tripUpdate.trip.tripId;
+      if (tripMap.has(tripId)) {
+        tripMap.get(tripId).tripUpdate = entity.tripUpdate;
+      } else {
+        tripMap.set(tripId, {
+          vehicle: null,
+          tripUpdate: entity.tripUpdate
+        });
+      }
+    }
+  }
+
+  const trains = [];
+
+  // Filter and map to RailTwin schema
+  for (const [tripId, data] of tripMap.entries()) {
+    // Only use trains that have at least a known position
+    if (!data.vehicle || !data.vehicle.position) continue;
+    
+    const routeId = data.vehicle.trip?.routeId || data.tripUpdate?.trip?.routeId || 'Unknown';
+    if (routeId === 'Unknown') continue;
+
+    const lat = data.vehicle.position.latitude;
+    const lng = data.vehicle.position.longitude;
+    
+    // We only want NYC area coords to filter out noise
+    if (lat < 40.0 || lat > 41.5 || lng > -73.0 || lng < -74.5) continue;
+
+    const delayMins = data.tripUpdate ? extractDelay(data.tripUpdate) : 0;
     const type = ROUTE_TYPE_MAP[routeId] ?? 'local';
 
     let status = 'on_time';
     if (delayMins > 10) status = 'delayed';
     else if (delayMins > 0) status = 'delayed';
-    else status = 'on_time';
 
-    return {
-      train_number: trainNumber,
-      mta_trip_id: trip?.tripId ?? null,
+    const currentStationId = data.vehicle.stopId || data.tripUpdate?.stopTimeUpdate?.[0]?.stopId || 'Unknown';
+
+    // Simulated metrics based on tripId to keep UI rich
+    const hash = Math.abs(hashString(tripId));
+    const capacity = type === 'express' ? 1200 : 800; // Realistic subway capacity
+    const occFactor = (hash % 60 + 30) / 100; // 30-90%
+    const passengers = Math.round(capacity * occFactor);
+    const speed = data.vehicle.position.speed ? Math.round(data.vehicle.position.speed * 3.6) : (hash % 40 + 20); // convert m/s to km/h or fake it
+
+    trains.push({
+      train_number: \`\${routeId}-\${tripId.substring(tripId.length - 4)}\`,
+      name: \`\${routeId} Train\`,
+      mta_trip_id: tripId,
       mta_route_id: routeId,
+      latitude: lat,
+      longitude: lng,
+      speed_kmh: speed,
       delay_minutes: delayMins,
       status,
       type,
-      // lat/lng and station names are left empty here —
-      // the frontend merges with simulation data for smooth map animation
-    };
-  });
+      current_station: currentStationId, // We will just use stopId for now or let frontend decode
+      next_station: 'Continuing',
+      platform: (hash % 4) + 1,
+      passenger_count: passengers,
+      capacity: capacity,
+      route: [currentStationId] // Minimal route
+    });
+  }
 
   return trains;
 }
 
 export default async function handler(req, res) {
-  // CORS — allow the Vite dev server and Vercel preview
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Cache-Control', 'public, max-age=20, stale-while-revalidate=40');
@@ -110,21 +165,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Fetch all feeds in parallel
     const results = await Promise.all(MTA_FEEDS.map(fetchFeed));
     const allEntities = results.flat();
 
     if (allEntities.length === 0) {
-      // All feeds failed — tell the client to fall back
       res.status(503).json({ error: 'MTA feeds unavailable', trains: [] });
       return;
     }
 
-    const trains = mapToRailTwinTrains(allEntities);
+    const trains = normalizeTrains(allEntities);
     res.status(200).json({
       trains,
       fetched_at: new Date().toISOString(),
       entity_count: allEntities.length,
+      train_count: trains.length,
       source: 'mta-gtfs-realtime',
     });
   } catch (err) {

@@ -82,13 +82,17 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
   const interpRef = useRef({});        // train_number → { fromLat, fromLng, toLat, toLng, t }
   const rafRef = useRef(null);
 
-  // Smooth animation loop at ~30fps
+  // Smooth animation loop
   useEffect(() => {
     const animate = () => {
-      const now = Date.now();
       Object.entries(interpRef.current).forEach(([id, state]) => {
         if (!markersRef.current[id]) return;
-        state.t = Math.min(1, state.t + 0.035); // ~35ms steps → ~1s travel
+        
+        // Slower animation if we have large jumps from real polling
+        const dist = Math.hypot(state.toLat - state.fromLat, state.toLng - state.fromLng);
+        const stepSize = dist > 0.01 ? 0.005 : 0.035; 
+        
+        state.t = Math.min(1, state.t + stepSize); 
         const lat = lerp(state.fromLat, state.toLat, state.t);
         const lng = lerp(state.fromLng, state.toLng, state.t);
         markersRef.current[id].setLatLng([lat, lng]);
@@ -176,7 +180,9 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
 }
 
 // ── Station layer (static) ─────────────────────────────────────────────────────
-function StationLayer({ trains }) {
+function StationLayer({ trains, isMtaLive }) {
+  if (isMtaLive) return null; // Hide fictional layout when using real MTA map
+
   const arrivingStations = new Set(
     trains.filter(t => t.status === 'arrived').map(t => t.current_station)
   );
@@ -233,7 +239,7 @@ export default function LiveMap() {
   return (
     <div className="relative h-screen w-full">
       <MapContainer
-        center={[40.75, -73.99]}
+        center={[40.73, -73.99]}
         zoom={12}
         style={{ height: '100%', width: '100%', background: '#0a0f1e' }}
         zoomControl={false}
@@ -242,7 +248,7 @@ export default function LiveMap() {
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           attribution='&copy; <a href="https://carto.com">CARTO</a>'
         />
-        <StationLayer trains={trains} />
+        <StationLayer trains={trains} isMtaLive={syncStatus === 'mta-live'} />
         <LiveTrainLayer trainsRef={trainsRef} selectedRef={selectedRef} onSelect={handleSelect} />
       </MapContainer>
 
