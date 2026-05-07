@@ -50,6 +50,24 @@ export function useRealTimeTrains() {
   // ── MTA hook (priority-1 source) ────────────────────────────────────────────
   const { mtaTrains, mtaStatus } = useMtaTrains();
 
+  // ── Fast-path: update status immediately when MTA connects ─────────────────
+  // Don't wait for the next Base44 tick — update badge instantly.
+  useEffect(() => {
+    if (mtaStatus === 'live') {
+      setSyncStatus('mta-live');
+    }
+  }, [mtaStatus]);
+
+  // ── Fallback timeout: if nothing connects in 6s, show 'offline' ────────────
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSyncStatus(prev =>
+        prev === 'connecting' ? 'offline' : prev
+      );
+    }, 6000);
+    return () => clearTimeout(t);
+  }, []);
+
   useEffect(() => {
     let alive = true;
 

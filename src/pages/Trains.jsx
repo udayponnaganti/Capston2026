@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Search, Zap, Loader2, Wifi, WifiOff } from 'lucide-react';
+import { Search, Zap, Loader2, Wifi, WifiOff, Radio } from 'lucide-react';
 import { useRealTimeTrains } from '@/lib/useRealTimeTrains';
 import TrainStatusCard from '@/components/admin/TrainStatusCard';
 import { Button } from '@/components/ui/button';
@@ -190,16 +190,19 @@ export default function Trains() {
             </p>
             {/* Backend sync status */}
             <div className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${
-              syncStatus === 'live'    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
-              syncStatus === 'offline' ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400' :
-                                        'bg-blue-500/10 border-blue-500/30 text-blue-400'
+              syncStatus === 'mta-live' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+              syncStatus === 'live'     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+              syncStatus === 'offline'  ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400' :
+                                         'bg-blue-500/10 border-blue-500/30 text-blue-400'
             }`}>
-              {syncStatus === 'live'    ? <Wifi className="w-3 h-3" /> :
-               syncStatus === 'offline' ? <WifiOff className="w-3 h-3" /> :
-                                          <Loader2 className="w-3 h-3 animate-spin" />}
-              {syncStatus === 'live'    ? 'Backend: Live' :
-               syncStatus === 'offline' ? 'Backend: Offline (local sim)' :
-                                          'Connecting...'}
+              {syncStatus === 'mta-live' ? <Radio className="w-3 h-3" /> :
+               syncStatus === 'live'     ? <Wifi className="w-3 h-3" /> :
+               syncStatus === 'offline'  ? <WifiOff className="w-3 h-3" /> :
+                                           <Loader2 className="w-3 h-3 animate-spin" />}
+              {syncStatus === 'mta-live' ? 'MTA Live' :
+               syncStatus === 'live'     ? 'Backend: Live' :
+               syncStatus === 'offline'  ? 'Backend: Offline (local sim)' :
+                                           'Connecting...'}
             </div>
           </div>
         </div>

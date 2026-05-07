@@ -4,7 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { STATIONS } from '@/lib/trainSimulation';
 import { useRealTimeTrains } from '@/lib/useRealTimeTrains';
-import { ArrowRight, Gauge, Users, Train, X, Zap, Activity, Wifi, WifiOff } from 'lucide-react';
+import { ArrowRight, Gauge, Users, Train, X, Zap, Activity, Wifi, WifiOff, Radio } from 'lucide-react';
 import TrainStatusBadge from '@/components/admin/TrainStatusBadge';
 
 const STATUS_COLORS = {
@@ -253,13 +253,17 @@ export default function LiveMap() {
           <span className="text-xs font-mono text-foreground">LIVE · {trains.length} trains</span>
         </div>
         <div className={`glass rounded-full px-3 py-1.5 flex items-center gap-1.5 text-xs font-mono ${
-          syncStatus === 'live'    ? 'text-emerald-400' :
-          syncStatus === 'offline' ? 'text-yellow-400' : 'text-blue-400'
+          syncStatus === 'mta-live' ? 'text-emerald-400' :
+          syncStatus === 'live'     ? 'text-emerald-400' :
+          syncStatus === 'offline'  ? 'text-yellow-400'  : 'text-blue-400'
         }`}>
-          {syncStatus === 'live'    ? <Wifi className="w-3 h-3" /> :
-           syncStatus === 'offline' ? <WifiOff className="w-3 h-3" /> :
-                                      <span className="w-3 h-3 border border-current rounded-full animate-spin inline-block" />}
-          {syncStatus === 'live' ? 'API Live' : syncStatus === 'offline' ? 'Local Sim' : 'Connecting...'}
+          {syncStatus === 'mta-live' ? <Radio className="w-3 h-3" /> :
+           syncStatus === 'live'     ? <Wifi className="w-3 h-3" /> :
+           syncStatus === 'offline'  ? <WifiOff className="w-3 h-3" /> :
+                                       <span className="w-3 h-3 border border-current rounded-full animate-spin inline-block" />}
+          {syncStatus === 'mta-live' ? 'MTA Live' :
+           syncStatus === 'live'     ? 'API Live' :
+           syncStatus === 'offline'  ? 'Local Sim' : 'Connecting...'}
         </div>
       </div>
 
