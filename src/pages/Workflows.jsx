@@ -236,10 +236,18 @@ function WorkflowCard({ wf, onClick }) {
 }
 
 // ── Workflow Detail Modal ─────────────────────────────────────────────────────
-function WorkflowDetail({ wf, onClose }) {
+const STATUS_CYCLE = ['open', 'in_progress', 'resolved', 'closed'];
+
+function WorkflowDetail({ wf, onClose, onUpdate }) {
   if (!wf) return null;
-  const cfg = statusConfig[wf.status] || statusConfig.open;
-  const pct = wf.tasks_total > 0 ? Math.round((wf.tasks_done / wf.tasks_total) * 100) : 0;
+
+  // Local state so edits are live inside the modal
+  const [localStatus, setLocalStatus]   = useState(wf.status);
+  const [tasksDone,   setTasksDone]     = useState(wf.tasks_done);
+  const [saved,       setSaved]         = useState(false);
+
+  const cfg  = statusConfig[localStatus] || statusConfig.open;
+  const pct  = wf.tasks_total > 0 ? Math.round((tasksDone / wf.tasks_total) * 100) : 0;
 
   const taskLabels = [
     'Assess and document incident',
@@ -247,6 +255,30 @@ function WorkflowDetail({ wf, onClose }) {
     'Deploy on-site response team',
     'Confirm resolution and close ticket',
   ].slice(0, wf.tasks_total);
+
+  // Toggle a task checkbox
+  const toggleTask = (i) => {
+    setTasksDone(prev => {
+      // If clicking the next unchecked task → check it; if clicking a checked task → uncheck all from i onward
+      if (i < prev) return i;          // uncheck from this index
+      if (i === prev) return prev + 1; // check this one
+      return prev;                     // clicking beyond next — no-op
+    });
+    setSaved(false);
+  };
+
+  // Cycle through statuses
+  const cycleStatus = () => {
+    const idx = STATUS_CYCLE.indexOf(localStatus);
+    setLocalStatus(STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length]);
+    setSaved(false);
+  };
+
+  // Persist changes back to parent
+  const handleUpdate = () => {
+    onUpdate({ ...wf, status: localStatus, tasks_done: tasksDone });
+    setSaved(true);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
@@ -266,31 +298,64 @@ function WorkflowDetail({ wf, onClose }) {
 
         <p className="text-sm text-muted-foreground leading-relaxed">{wf.detail}</p>
 
+        {/* Status cycler */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground font-medium">Status:</span>
+          <button
+            onClick={cycleStatus}
+            className={`text-xs px-3 py-1 rounded-full font-semibold border transition-all hover:opacity-80 active:scale-95 ${cfg.bg} ${cfg.color} ${cfg.border}`}
+          >
+            {cfg.label} →
+          </button>
+          <span className="text-[10px] text-muted-foreground italic">click to cycle</span>
+        </div>
+
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-foreground">Task Progress</span>
-            <span className="text-xs font-mono text-muted-foreground">{wf.tasks_done}/{wf.tasks_total} · {pct}%</span>
+            <span className="text-xs font-mono text-muted-foreground">{tasksDone}/{wf.tasks_total} · {pct}%</span>
           </div>
           <div className="w-full h-2 bg-secondary rounded-full mb-4">
-            <div className={`h-2 rounded-full ${progressBarColor(pct)}`} style={{ width: `${pct}%` }} />
+            <div
+              className={`h-2 rounded-full transition-all duration-500 ${progressBarColor(pct)}`}
+              style={{ width: `${pct}%` }}
+            />
           </div>
           <div className="space-y-2">
-            {taskLabels.map((label, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
-                  i < wf.tasks_done ? 'bg-emerald-400 border-emerald-400' : 'border-border'
-                }`}>
-                  {i < wf.tasks_done && <span className="text-[10px] text-black font-bold">✓</span>}
-                </div>
-                <span className={`text-xs ${i < wf.tasks_done ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{label}</span>
-              </div>
-            ))}
+            {taskLabels.map((label, i) => {
+              const done = i < tasksDone;
+              return (
+                <button
+                  key={i}
+                  onClick={() => toggleTask(i)}
+                  className="flex items-center gap-3 w-full text-left group hover:bg-secondary/40 rounded-lg px-2 py-1 transition-all"
+                >
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                    done
+                      ? 'bg-emerald-400 border-emerald-400 scale-110'
+                      : 'border-border group-hover:border-emerald-400/60'
+                  }`}>
+                    {done && <span className="text-[10px] text-black font-bold">✓</span>}
+                  </div>
+                  <span className={`text-xs transition-all ${
+                    done ? 'line-through text-muted-foreground' : 'text-foreground'
+                  }`}>{label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
         <div className="flex gap-2 pt-2">
-          <button className="flex-1 py-2 rounded-lg bg-primary/10 border border-primary/30 text-primary text-xs font-semibold hover:bg-primary hover:text-primary-foreground transition-all">
-            Update Status
+          <button
+            onClick={handleUpdate}
+            className={`flex-1 py-2 rounded-lg border text-xs font-semibold transition-all active:scale-95 ${
+              saved
+                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                : 'bg-primary/10 border-primary/30 text-primary hover:bg-primary hover:text-primary-foreground'
+            }`}
+          >
+            {saved ? '✓ Saved' : 'Update Status'}
           </button>
           <button onClick={onClose} className="py-2 px-4 rounded-lg bg-secondary border border-border text-muted-foreground text-xs font-semibold hover:text-foreground transition-all">
             Close
@@ -307,6 +372,12 @@ export default function Workflows() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedWf, setSelectedWf] = useState(null);
+
+  // Apply updates from the detail modal back into the workflow list
+  const handleUpdate = (updated) => {
+    setWorkflows(prev => prev.map(w => w.id === updated.id ? updated : w));
+    setSelectedWf(updated); // keep modal open with fresh data
+  };
 
   const generate = () => {
     setLoading(true);
@@ -395,7 +466,13 @@ export default function Workflows() {
       )}
 
       {/* Detail modal */}
-      {selectedWf && <WorkflowDetail wf={selectedWf} onClose={() => setSelectedWf(null)} />}
+      {selectedWf && (
+        <WorkflowDetail
+          wf={selectedWf}
+          onClose={() => setSelectedWf(null)}
+          onUpdate={handleUpdate}
+        />
+      )}
     </div>
   );
 }
