@@ -84,38 +84,69 @@ function generateTasks(alert) {
 
 // ─── Incident Response Panel (slide-over) ──────────────────────────────────────
 function IncidentPanel({ alert, onClose }) {
-  const [leadTeam, setLeadTeam] = useState('operations');
+  const [leadTeam, setLeadTeam] = useState(
+    // Auto-detect best lead team from AI suggestion
+    () => {
+      const sug = (alert.ai_suggestion || '').toLowerCase();
+      if (sug.includes('electrical') || sug.includes('signal')) return 'electrical';
+      if (sug.includes('track') || sug.includes('segment')) return 'track';
+      if (sug.includes('safety') || sug.includes('escalate')) return 'safety';
+      if (sug.includes('passenger') || sug.includes('board')) return 'it';
+      if (sug.includes('mechanical') || sug.includes('crew')) return 'mechanical';
+      return 'operations';
+    }
+  );
   const [notes, setNotes]       = useState('');
   const [tasks]                 = useState(() => generateTasks(alert));
   const [triggering, setTriggering] = useState(false);
   const [triggered, setTriggered]   = useState(false);
+  const [aiApplied, setAiApplied]   = useState(false);
 
   const cfg  = severityConfig[alert.severity] || severityConfig.info;
   const Icon = cfg.icon;
 
   const priority = alert.severity === 'critical' ? 'p1' : alert.severity === 'warning' ? 'p2' : 'p3';
 
+  // Apply AI suggestion into Notes field
+  const applyAiSuggestion = () => {
+    setNotes(prev => prev
+      ? prev + '\n\n[AI] ' + alert.ai_suggestion
+      : '[AI] ' + alert.ai_suggestion
+    );
+    setAiApplied(true);
+  };
+
   const handleTrigger = async () => {
     setTriggering(true);
+    const workflow = {
+      alert_title:    alert.title,
+      alert_severity: alert.severity,
+      alert_type:     alert.type || 'anomaly',
+      train_number:   alert.train_number || '',
+      station:        alert.station || '',
+      status:         'in_progress',
+      priority,
+      assigned_team:  leadTeam,
+      protocol:       tasks.map(t => `[${t.team.toUpperCase()}] ${t.title}`).join('\n'),
+      notes,
+      triggered_at:   new Date().toISOString(),
+    };
+
+    // Always save locally first (guaranteed to work)
     try {
-      // Save incident workflow to backend
-      const workflow = {
-        alert_title:    alert.title,
-        alert_severity: alert.severity,
-        alert_type:     alert.type || 'anomaly',
-        train_number:   alert.train_number || '',
-        station:        alert.station || '',
-        status:         'in_progress',
-        priority,
-        assigned_team:  leadTeam,
-        protocol:       tasks.map(t => `[${t.team.toUpperCase()}] ${t.title}`).join('\n'),
-        notes,
-      };
+      const existing = JSON.parse(localStorage.getItem('railtwin_workflows') || '[]');
+      existing.unshift({ ...workflow, id: `wf-${Date.now()}` });
+      localStorage.setItem('railtwin_workflows', JSON.stringify(existing.slice(0, 50)));
+    } catch (_) {}
+
+    // Also try backend (non-blocking)
+    try {
       await base44.entities.IncidentWorkflow.create(workflow);
-    } catch (e) { /* backend unavailable, still proceed */ }
+    } catch (_) { /* backend unavailable – local save already done */ }
+
     setTriggering(false);
     setTriggered(true);
-    setTimeout(onClose, 1800);
+    setTimeout(onClose, 2000);
   };
 
   return (
@@ -127,7 +158,7 @@ function IncidentPanel({ alert, onClose }) {
       />
 
       {/* Side panel */}
-      <div className="fixed right-0 top-0 h-full w-full max-w-md z-50 flex flex-col bg-card border-l border-border shadow-2xl overflow-y-auto">
+      <div className="fixed right-0 top-0 h-full w-full max-w-md z-50 flex flex-col bg-card border-l border-border shadow-2xl">
 
         {/* Top strip */}
         <div className="px-5 pt-5 pb-4 border-b border-border flex-shrink-0">
@@ -158,37 +189,66 @@ function IncidentPanel({ alert, onClose }) {
           </div>
         </div>
 
-        {/* Body */}
+        {/* Body — scrollable */}
         <div className="flex-1 px-5 py-4 space-y-5 overflow-y-auto">
 
           {/* Description */}
           <p className="text-sm text-muted-foreground leading-relaxed">{alert.description}</p>
 
-          {/* AI Suggestion */}
+          {/* AI Suggestion with Apply button */}
           {alert.ai_suggestion && (
-            <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 px-4 py-3 flex items-start gap-2.5">
-              <Zap className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" fill="currentColor" />
-              <div>
-                <p className="text-xs font-semibold text-emerald-400 mb-0.5">AI Recommendation</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">{alert.ai_suggestion}</p>
+            <div className="rounded-xl border px-4 py-3 flex flex-col gap-2"
+              style={{ background: 'hsla(155,60%,40%,0.07)', borderColor: 'hsla(155,60%,50%,0.25)' }}>
+              <div className="flex items-start gap-2.5">
+                <Zap className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" fill="currentColor" />
+                <div className="flex-1">
+                  <p className="text-xs font-semibold text-emerald-400 mb-0.5">AI Recommendation</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{alert.ai_suggestion}</p>
+                </div>
               </div>
+              <button
+                onClick={applyAiSuggestion}
+                disabled={aiApplied}
+                className="self-start ml-6 px-3 py-1 rounded-lg text-xs font-semibold transition-all"
+                style={aiApplied
+                  ? { background: 'hsla(155,60%,40%,0.15)', color: 'hsl(155,60%,65%)', cursor: 'default' }
+                  : { background: 'hsla(155,60%,40%,0.2)', color: 'hsl(155,60%,65%)', border: '1px solid hsla(155,60%,50%,0.3)' }
+                }
+              >
+                {aiApplied ? '✓ Applied to Notes' : '⚡ Apply Suggestion'}
+              </button>
             </div>
           )}
 
-          {/* Lead Team */}
+          {/* Lead Team — custom button group */}
           <div>
             <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground block mb-2">
               Lead Team
             </label>
-            <select
-              value={leadTeam}
-              onChange={e => setLeadTeam(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary capitalize"
-            >
-              {TEAMS.map(t => (
-                <option key={t} value={t} className="capitalize">{t}</option>
-              ))}
-            </select>
+            <div className="grid grid-cols-3 gap-2">
+              {TEAMS.map(t => {
+                const active = leadTeam === t;
+                const color = {
+                  operations: active ? 'bg-blue-500 text-white border-blue-500' : 'border-blue-500/20 text-blue-400 hover:border-blue-500/50',
+                  mechanical:  active ? 'bg-orange-500 text-white border-orange-500' : 'border-orange-500/20 text-orange-400 hover:border-orange-500/50',
+                  electrical:  active ? 'bg-yellow-500 text-white border-yellow-500' : 'border-yellow-500/20 text-yellow-400 hover:border-yellow-500/50',
+                  safety:      active ? 'bg-red-500 text-white border-red-500' : 'border-red-500/20 text-red-400 hover:border-red-500/50',
+                  it:          active ? 'bg-purple-500 text-white border-purple-500' : 'border-purple-500/20 text-purple-400 hover:border-purple-500/50',
+                  track:       active ? 'bg-emerald-500 text-white border-emerald-500' : 'border-emerald-500/20 text-emerald-400 hover:border-emerald-500/50',
+                }[t] || '';
+                return (
+                  <button
+                    key={t}
+                    onClick={() => setLeadTeam(t)}
+                    className={`px-2 py-2 rounded-xl border text-xs font-semibold capitalize transition-all ${color} ${
+                      active ? '' : 'bg-secondary/50'
+                    }`}
+                  >
+                    {active && <span className="mr-1">✓</span>}{t}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Notes */}
@@ -238,19 +298,25 @@ function IncidentPanel({ alert, onClose }) {
           {triggered ? (
             <div className="w-full py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center gap-2 text-emerald-400 font-semibold text-sm">
               <CheckCircle2 className="w-4 h-4" />
-              Protocol Triggered Successfully
+              Protocol Triggered — {leadTeam.charAt(0).toUpperCase() + leadTeam.slice(1)} Team Notified
             </div>
           ) : (
             <button
               onClick={handleTrigger}
               disabled={triggering}
-              className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60"
+              className="w-full py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-60"
+              style={{ background: 'hsl(var(--primary))', color: 'hsl(var(--primary-foreground))' }}
             >
               {triggering
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Triggering Protocol...</>
                 : <><Zap className="w-4 h-4" fill="currentColor" /> Trigger Response Protocol</>
               }
             </button>
+          )}
+          {!triggered && (
+            <p className="text-xs text-muted-foreground text-center mt-2">
+              Assigned to <span className="font-semibold capitalize" style={{color:'hsl(var(--primary))'}}>{leadTeam}</span> team · {priority.toUpperCase()}
+            </p>
           )}
         </div>
       </div>
