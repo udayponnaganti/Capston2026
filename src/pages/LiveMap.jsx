@@ -114,9 +114,14 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
         // ── Dwell at station ───────────────────────────────────────────────
         if (s.dwellUntil && nowSecs < s.dwellUntil) return;
 
-        // ── No destination or stale ────────────────────────────────────────
+        // ── Freeze cancelled / stalled trains ───────────────────────────────
+        if (s.status === 'cancelled' || s.status === 'stalled' || s.stale) {
+          marker.setLatLng([s.feedLat, s.feedLng]); // snap to feed anchor
+          return;
+        }
+
+        // ── No destination ────────────────────────────────────────────────
         if (!s.nextLat || !s.nextLng) return;
-        if (s.stale) return;
 
         // ── Time-based progress ────────────────────────────────────────────
         // We want the train to reach nextLat/nextLng by arrivalAt.
@@ -196,6 +201,7 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
             isDwelling: train.is_dwelling,
             dwellUntil: train.is_dwelling ? nowSecs + DWELL_SECS : null,
             stale:      isStale,
+            status:     effStatus,   // track for freeze check
           };
         } else {
           const s = stateRef.current[id];
@@ -228,7 +234,8 @@ function LiveTrainLayer({ trainsRef, selectedRef, onSelect }) {
             s.arrivalAt  = train.arrival_at_next; // may be null — falls back to 45s window
           }
 
-          s.stale = isStale;
+          s.stale  = isStale;
+          s.status = effStatus;   // keep status in sync for freeze check
 
           // ── Update icon if status/selection changed ───────────────────────
           markersRef.current[id].setIcon(createTrainIcon(effStatus, sel === id));
@@ -544,9 +551,15 @@ export default function LiveMap() {
           <div>
             <p className="text-xs text-muted-foreground mb-2 font-medium">Route</p>
             <div className="space-y-1 max-h-32 overflow-auto">
-              {selectedTrain.route?.map((station, i) => {
+              {selectedTrain.route
+                ?.filter(stop => {
+                  // Filter out the raw lat/lng strings we packed into route[2] and route[3]
+                  const n = parseFloat(stop);
+                  return isNaN(n) || Math.abs(n) < 1; // keep station names (not valid coords)
+                })
+                .map((station, i, arr) => {
                 const current = station === selectedTrain.current_station;
-                const passed = selectedTrain.route.indexOf(selectedTrain.current_station) > i;
+                const passed  = arr.indexOf(selectedTrain.current_station) > i;
                 return (
                   <div key={i} className="flex items-center gap-2">
                     <div className={`w-2 h-2 rounded-full flex-shrink-0 ${current ? 'bg-primary animate-live-pulse' : passed ? 'bg-accent' : 'bg-secondary border border-border'}`} />

@@ -17,6 +17,9 @@ import Analytics from '@/pages/Analytics';
 import PassengerView from '@/pages/PassengerView';
 import AdminLogin from '@/pages/AdminLogin';
 import PassengerPortal from '@/pages/PassengerPortal';
+import AIController from '@/pages/AIController';
+import ScenarioSimulator from '@/pages/ScenarioSimulator';
+import DigitalTwinReplay from '@/pages/DigitalTwinReplay';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -62,6 +65,9 @@ const AuthenticatedApp = () => {
         <Route path="/workflows" element={<Workflows />} />
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/passenger" element={<PassengerView />} />
+        <Route path="/ai-controller" element={<AIController />} />
+        <Route path="/scenario-simulator" element={<ScenarioSimulator />} />
+        <Route path="/replay" element={<DigitalTwinReplay />} />
       </Route>
 
       <Route path="*" element={<PageNotFound />} />

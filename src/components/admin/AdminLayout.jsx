@@ -3,7 +3,7 @@ import { Link, useLocation, Outlet } from 'react-router-dom';
 import { 
   LayoutDashboard, Map, Train, AlertTriangle, GitBranch, 
   BarChart3, Users, ChevronLeft, ChevronRight, Zap, ExternalLink,
-  Radio, Wifi, WifiOff
+  Radio, Wifi, WifiOff, BrainCircuit, GitPullRequest, History
 } from 'lucide-react';
 import { useRealTimeTrains } from '@/lib/useRealTimeTrains';
 
@@ -15,6 +15,9 @@ const navItems = [
   { icon: GitBranch, label: 'Workflows', path: '/workflows' },
   { icon: BarChart3, label: 'Analytics', path: '/analytics' },
   { icon: Users, label: 'Passenger View', path: '/passenger' },
+  { icon: BrainCircuit, label: 'AI Control Center', path: '/ai-controller' },
+  { icon: GitPullRequest, label: 'Scenario Lab', path: '/scenario-simulator' },
+  { icon: History, label: 'Replay Lab', path: '/replay' },
 ];
 
 // Sync badge config keyed by syncStatus value

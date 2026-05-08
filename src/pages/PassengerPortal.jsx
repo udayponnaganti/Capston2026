@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Home, Search, Map, AlertTriangle, Star, ArrowRight, Users, Train,
   LogIn, LogOut, X, XCircle, Info, Zap, Bell, BellRing, CheckCircle2 } from 'lucide-react';
-import { simulateTrainStates, getNetworkStats, STATIONS } from '@/lib/trainSimulation';
+import { getNetworkStats, STATIONS } from '@/lib/trainSimulation';
+import { useRealTimeTrains } from '@/lib/useRealTimeTrains';
 import moment from 'moment';
 import { getPassengerNotifications, markNotificationRead, clearPassengerNotifications } from '@/lib/passengerNotifications';
 
@@ -67,11 +68,11 @@ function LoginScreen({ onLogin }) {
 }
 
 export default function PassengerPortal() {
+  const { trains, syncStatus } = useRealTimeTrains();
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem('railtwin_passenger') || 'null'); } catch { return null; }
   });
   const [tab, setTab] = useState('home');
-  const [trains, setTrains] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [notifications, setNotifications] = useState(() => getPassengerNotifications());
   const [bannerNotif, setBannerNotif] = useState(null);
@@ -91,12 +92,7 @@ export default function PassengerPortal() {
     setUser(null);
   };
 
-  useEffect(() => {
-    const init = simulateTrainStates(0);
-    setTrains(init);
-    const interval = setInterval(() => setTrains(simulateTrainStates(Date.now() % 1000)), 5000);
-    return () => clearInterval(interval);
-  }, []);
+  // Trains automatically sync via useRealTimeTrains every 3s
 
   // ── Listen for new passenger notifications pushed from admin trigger ─────────
   useEffect(() => {
@@ -134,8 +130,7 @@ export default function PassengerPortal() {
         return;
       }
     } catch (e) { /* ignore */ }
-    // Fallback: generate from current sim state
-    const trains = simulateTrainStates(Date.now() % 1000);
+    // Fallback: generate from current live state
     const delayed = trains.filter(t => t.status === 'delayed');
     const highOcc = trains.filter(t => t.capacity > 0 && (t.occupancy / t.capacity) > 0.85);
     const generated = [];
@@ -161,7 +156,7 @@ export default function PassengerPortal() {
         ai_suggestion: `Consider next available service. Staff deployed at platform.` });
     }
     generated.push({ id: 'p-4', severity: 'info', title: 'Network Status Update',
-      description: `${trains.filter(t=>t.status==='on_time').length} of ${trains.length} services running on time. Live updates every 30 seconds.`,
+      description: `${trains.filter(t=>t.status==='on_time').length} of ${trains.length} services running on time. Live updates every 3 seconds.`,
       ai_suggestion: null });
     setAlerts(generated);
   };

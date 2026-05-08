@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Home, Search, Map, AlertTriangle, Star, ArrowRight, Users,
   XCircle, Info, Zap, Bell, BellRing, CheckCircle2, X } from 'lucide-react';
-import { simulateTrainStates, getNetworkStats, STATIONS } from '@/lib/trainSimulation';
+import { getNetworkStats, STATIONS } from '@/lib/trainSimulation';
+import { useRealTimeTrains } from '@/lib/useRealTimeTrains';
 import moment from 'moment';
 import { getPassengerNotifications, markNotificationRead, clearPassengerNotifications } from '@/lib/passengerNotifications';
 
@@ -32,8 +33,8 @@ function StatusBadge({ status }) {
 }
 
 export default function PassengerView() {
+  const { trains, syncStatus } = useRealTimeTrains();
   const [tab, setTab] = useState('home');
-  const [trains, setTrains] = useState(() => simulateTrainStates(0));
   const [alerts, setAlerts] = useState([]);
   const [notifications, setNotifications] = useState(() => getPassengerNotifications());
   const [bannerNotif, setBannerNotif] = useState(null);
@@ -45,11 +46,7 @@ export default function PassengerView() {
   const [journeyFrom, setJourneyFrom] = useState('');
   const [journeyTo, setJourneyTo] = useState('');
 
-  // Live simulation
-  useEffect(() => {
-    const interval = setInterval(() => setTrains(simulateTrainStates(Date.now() % 1000)), 3000);
-    return () => clearInterval(interval);
-  }, []);
+  // Trains automatically sync via useRealTimeTrains every 3s
 
   // ── Cross-tab + same-tab notification listener ────────────────────────────────
   useEffect(() => {
@@ -72,7 +69,6 @@ export default function PassengerView() {
     };
   }, []);
 
-  // Load alerts — forceRefresh=true skips localStorage and regenerates from live sim
   const loadAlerts = (forceRefresh = false) => {
     if (!forceRefresh) {
       try {
@@ -80,10 +76,9 @@ export default function PassengerView() {
         if (stored) { setAlerts(JSON.parse(stored)); return; }
       } catch (e) { /* ignore */ }
     }
-    // Regenerate from live sim
-    const simTrains = simulateTrainStates(Date.now() % 1000);
-    const delayed = simTrains.filter(t => t.status === 'delayed');
-    const highOcc = simTrains.filter(t => t.capacity > 0 && (t.occupancy / t.capacity) > 0.85);
+    // Regenerate from live trains
+    const delayed = trains.filter(t => t.status === 'delayed');
+    const highOcc = trains.filter(t => t.capacity > 0 && (t.occupancy / t.capacity) > 0.85);
     const gen = [];
     if (delayed[0]) {
       const t = delayed[0];
@@ -107,7 +102,7 @@ export default function PassengerView() {
         ai_suggestion: `Consider next available service. Staff deployed at platform.` });
     }
     gen.push({ id: 'pv-4', severity: 'info', title: 'Network Status Update',
-      description: `${simTrains.filter(t => t.status === 'on_time').length} of ${simTrains.length} services running on time. Live updates every 30 seconds.`,
+      description: `${trains.filter(t => t.status === 'on_time').length} of ${trains.length} services running on time. Live updates every 3 seconds.`,
       ai_suggestion: null });
     setAlerts(gen);
   };

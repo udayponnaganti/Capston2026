@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { GitBranch, Loader2, Clock, CheckCircle2, AlertCircle, BarChart2, RefreshCw, Zap } from 'lucide-react';
-import { simulateTrainStates } from '@/lib/trainSimulation';
+import { useRealTimeTrains } from '@/lib/useRealTimeTrains';
 import { Button } from '@/components/ui/button';
 
 // ── Config ─────────────────────────────────────────────────────────────────────
@@ -368,8 +368,9 @@ function WorkflowDetail({ wf, onClose, onUpdate }) {
 
 // ── Main Workflows Page ───────────────────────────────────────────────────────
 export default function Workflows() {
+  const { trains, syncStatus } = useRealTimeTrains();
   const [workflows, setWorkflows] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedWf, setSelectedWf] = useState(null);
 
@@ -379,17 +380,21 @@ export default function Workflows() {
     setSelectedWf(updated); // keep modal open with fresh data
   };
 
-  const generate = () => {
+  const generate = (currentTrains = trains) => {
+    if (!currentTrains || currentTrains.length === 0) return;
     setLoading(true);
     // Short delay for UX feel
     setTimeout(() => {
-      const trains = simulateTrainStates(Date.now() % 1000);
-      setWorkflows(generateWorkflows(trains));
+      setWorkflows(generateWorkflows(currentTrains));
       setLoading(false);
     }, 900);
   };
 
-  useEffect(() => { generate(); }, []);
+  useEffect(() => {
+    if (trains.length > 0 && workflows.length === 0) {
+      generate(trains);
+    }
+  }, [trains, workflows.length]);
 
   const filtered = workflows.filter(w => statusFilter === 'all' || w.status === statusFilter);
   const openCount      = workflows.filter(w => w.status === 'open').length;
@@ -421,11 +426,11 @@ export default function Workflows() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={generate} disabled={loading}
+          <button onClick={() => generate(trains)} disabled={loading || trains.length === 0}
             className="p-2 rounded-lg border border-border hover:bg-secondary transition-all disabled:opacity-50">
             <RefreshCw className={`w-4 h-4 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
           </button>
-          <Button onClick={generate} disabled={loading} className="bg-blue-500 hover:bg-blue-600 text-white font-medium gap-2">
+          <Button onClick={() => generate(trains)} disabled={loading || trains.length === 0} className="bg-blue-500 hover:bg-blue-600 text-white font-medium gap-2">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" fill="currentColor" />}
             Generate Workflows
           </Button>

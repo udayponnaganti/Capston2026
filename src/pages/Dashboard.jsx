@@ -1,66 +1,87 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Train, Clock, AlertTriangle, Activity, XCircle, Info } from 'lucide-react';
-import { LineChart, Line, AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import { simulateTrainStates, getNetworkStats } from '@/lib/trainSimulation';
+import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts';
 import KpiCard from '@/components/admin/KpiCard';
 import TrainStatusCard from '@/components/admin/TrainStatusCard';
 import WeatherWidget from '@/components/admin/WeatherWidget';
-import { useNavigate } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
+import { useRealTimeTrains } from '@/lib/useRealTimeTrains';
+import { useRailTwinStore } from '@/lib/railTwinStore';
 import moment from 'moment';
 
 const CHART_HISTORY = 20;
 
+function computeStats(trains) {
+  if (!trains.length) return { total: 0, onTime: 0, delayed: 0, cancelled: 0, onTimeRate: 0, avgDelay: 0, totalPassengers: 0, platformUtil: 0 };
+  const onTime    = trains.filter(t => ['on_time','arrived','departed'].includes(t.status)).length;
+  const delayed   = trains.filter(t => t.status === 'delayed').length;
+  const delays    = trains.filter(t => t.delay_minutes > 0).map(t => t.delay_minutes);
+  const avgDelay  = delays.length ? Math.round(delays.reduce((a, b) => a + b, 0) / delays.length) : 0;
+  const totalPax  = trains.reduce((s, t) => s + (t.passenger_count || t.occupancy || 0), 0);
+  const avgOcc    = trains.reduce((s, t) => {
+    const cap = t.capacity || 800;
+    const pax = t.passenger_count || t.occupancy || 0;
+    return s + Math.round((pax / cap) * 100);
+  }, 0) / Math.max(trains.length, 1);
+  return {
+    total: trains.length, onTime, delayed,
+    onTimeRate: Math.round((onTime / trains.length) * 100),
+    avgDelay, totalPassengers: totalPax,
+    platformUtil: Math.round(avgOcc),
+  };
+}
+
 export default function Dashboard() {
-  const [tick, setTick] = useState(0);
-  const [trains, setTrains] = useState([]);
-  const [alerts, setAlerts] = useState([]);
+  const { trains, syncStatus } = useRealTimeTrains();
+  const aiStore = useRailTwinStore();
+  const [alerts, setAlerts]   = useState([]);
   const [delayHistory, setDelayHistory] = useState([]);
   const [throughputHistory, setThroughputHistory] = useState([]);
 
-  // Load alerts: try real API first, fall back to localStorage
+  // Auto-generate alerts from real delayed trains
   useEffect(() => {
+    if (!trains.length) return;
     const loadAlerts = async () => {
       try {
         const apiAlerts = await base44.entities.Alert.list('-created_date', 5);
-        if (apiAlerts?.length > 0) {
-          setAlerts(apiAlerts);
-          // Keep localStorage in sync
-          localStorage.setItem('railtwin_alerts', JSON.stringify(apiAlerts));
-          return;
-        }
-      } catch (e) { /* API unavailable, fall through */ }
-      // Fallback to localStorage
-      try {
-        const stored = localStorage.getItem('railtwin_alerts');
-        if (stored) setAlerts(JSON.parse(stored).slice(0, 5));
-      } catch (e) { /* ignore */ }
+        if (apiAlerts?.length > 0) { setAlerts(apiAlerts); return; }
+      } catch (e) { /* fall through */ }
+      const generated = [];
+      trains.filter(t => t.delay_minutes >= 6).slice(0, 3).forEach(t => {
+        generated.push({
+          id: t.train_number + '_delay',
+          title: `Cascading Delay — ${t.name}`,
+          severity: t.delay_minutes >= 10 ? 'critical' : 'warning',
+          train_number: t.train_number,
+          station: t.current_station,
+        });
+      });
+      trains.filter(t => t.status === 'cancelled').slice(0, 1).forEach(t => {
+        generated.push({ id: t.train_number + '_cancel', title: `Cancelled — ${t.name}`, severity: 'critical', train_number: t.train_number, station: t.current_station });
+      });
+      setAlerts(generated.slice(0, 5));
     };
     loadAlerts();
     window.addEventListener('focus', loadAlerts);
     return () => window.removeEventListener('focus', loadAlerts);
-  }, []);
+  }, [trains]);
 
-
+  // Build chart history from live data every 3s
   useEffect(() => {
+    if (!trains.length) return;
     const interval = setInterval(() => {
-      setTick(t => {
-        const newTick = t + 1;
-        const newTrains = simulateTrainStates(newTick);
-        setTrains(newTrains);
-        const stats = getNetworkStats(newTrains);
-        const timeLabel = moment().format('HH:mm:ss');
-        setDelayHistory(prev => [...prev.slice(-CHART_HISTORY), { time: timeLabel, value: stats.avgDelay }]);
-        setThroughputHistory(prev => [...prev.slice(-CHART_HISTORY), { time: timeLabel, value: stats.totalPassengers }]);
-        return newTick;
-      });
+      const stats = computeStats(trains);
+      const timeLabel = moment().format('HH:mm:ss');
+      setDelayHistory(prev => [...prev.slice(-CHART_HISTORY), { time: timeLabel, value: stats.avgDelay }]);
+      setThroughputHistory(prev => [...prev.slice(-CHART_HISTORY), { time: timeLabel, value: stats.totalPassengers }]);
     }, 3000);
-    const initialTrains = simulateTrainStates(0);
-    setTrains(initialTrains);
     return () => clearInterval(interval);
-  }, []);
+  }, [trains]);
 
-  const stats = getNetworkStats(trains);
+  const stats = computeStats(trains);
+  const displayTrains = [...trains]
+    .sort((a, b) => (b.delay_minutes || 0) - (a.delay_minutes || 0))
+    .slice(0, 20);
 
   return (
     <div className="p-6 space-y-6">
@@ -70,7 +91,9 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-foreground">Operations Dashboard</h1>
           <div className="flex items-center gap-2 mt-1">
             <div className="w-2 h-2 rounded-full bg-accent animate-live-pulse" />
-            <span className="text-xs text-muted-foreground font-mono">LIVE · Updates every 3s · {moment().format('HH:mm:ss')}</span>
+            <span className="text-xs text-muted-foreground font-mono">
+              {syncStatus === 'live' ? 'LIVE · GTFS-RT' : 'LOCAL SIM'} · Updates every 3s · {moment().format('HH:mm:ss')}
+            </span>
           </div>
         </div>
       </div>
@@ -132,29 +155,32 @@ export default function Dashboard() {
 
       {/* Active Trains + Alerts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Active trains */}
         <div className="lg:col-span-2 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-foreground">Active Trains</h2>
-            <span className="text-xs text-muted-foreground font-mono">{trains.length} total</span>
+            <span className="text-xs text-muted-foreground font-mono">{displayTrains.length} total</span>
           </div>
           <div className="space-y-2 max-h-80 overflow-auto pr-1">
-            {trains.map(train => (
+            {displayTrains.map(train => (
               <TrainStatusCard key={train.train_number} train={train} compact />
             ))}
+            {displayTrains.length === 0 && (
+              <div className="text-xs text-muted-foreground text-center py-8">
+                {syncStatus === 'connecting' ? 'Connecting to live feed...' : 'No active trains'}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Sidebar: Alerts + Network Stats */}
         <div className="space-y-4">
           <div className="rounded-xl border border-border bg-card p-4">
             <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">Network Stats</h2>
             <div className="space-y-2">
               {[
                 { label: 'Total Passengers', value: stats.totalPassengers.toLocaleString(), color: 'text-primary' },
-                { label: 'Delayed Trains', value: stats.delayed, color: 'text-warning' },
-                { label: 'Avg Delay', value: `${stats.avgDelay} min`, color: 'text-warning' },
-                { label: 'On-Time Rate', value: `${stats.onTimeRate}%`, color: 'text-accent' },
+                { label: 'Delayed Trains',   value: stats.delayed,                          color: 'text-warning' },
+                { label: 'Avg Delay',        value: `${stats.avgDelay} min`,               color: 'text-warning' },
+                { label: 'On-Time Rate',     value: `${stats.onTimeRate}%`,                color: 'text-accent' },
               ].map(({ label, value, color }) => (
                 <div key={label} className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">{label}</span>
@@ -164,23 +190,43 @@ export default function Dashboard() {
             </div>
           </div>
 
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 mb-4">
+            <h2 className="text-xs font-medium text-primary uppercase tracking-wide mb-3 flex items-center gap-2">
+              <Activity className="w-4 h-4" /> NY AI Optimizer
+            </h2>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">AI Score</span>
+                <span className={`text-xs font-mono font-bold ${aiStore.optimizationScore > 80 ? 'text-emerald-400' : 'text-amber-400'}`}>{aiStore.optimizationScore}/100</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Conflicts Active</span>
+                <span className="text-xs font-mono font-bold text-amber-500">{aiStore.conflicts.length}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">NY Throughput</span>
+                <span className="text-xs font-mono font-bold text-blue-400">{aiStore.throughput}%</span>
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Recent Alerts</h2>
-              {alerts.length > 0 && (
-                <span className="text-xs text-muted-foreground">{alerts.length} active</span>
-              )}
+              {alerts.length > 0 && <span className="text-xs text-muted-foreground">{alerts.length} active</span>}
             </div>
             {alerts.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No alerts yet — visit the Alerts page to generate.</p>
+              <p className="text-xs text-muted-foreground">No alerts — visit the Alerts page to generate.</p>
             ) : (
               <div className="space-y-2">
                 {alerts.map(alert => {
                   const isC = alert.severity === 'critical';
                   const isW = alert.severity === 'warning';
                   const Icon = isC ? XCircle : isW ? AlertTriangle : Info;
-                  const color = isC ? 'text-destructive border-destructive/20 bg-destructive/5'
-                    : isW ? 'text-yellow-400 border-yellow-500/20 bg-yellow-500/5'
+                  const color = isC
+                    ? 'text-destructive border-destructive/20 bg-destructive/5'
+                    : isW
+                    ? 'text-yellow-400 border-yellow-500/20 bg-yellow-500/5'
                     : 'text-blue-400 border-blue-500/20 bg-blue-500/5';
                   const iconColor = isC ? 'text-destructive' : isW ? 'text-yellow-400' : 'text-blue-400';
                   return (
@@ -190,7 +236,9 @@ export default function Dashboard() {
                         <div className="min-w-0">
                           <p className="text-xs font-semibold text-foreground truncate">{alert.title}</p>
                           {alert.train_number && (
-                            <p className="text-xs text-muted-foreground mt-0.5">{alert.train_number}{alert.station ? ` · ${alert.station}` : ''}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {alert.train_number}{alert.station ? ` · ${alert.station}` : ''}
+                            </p>
                           )}
                         </div>
                       </div>

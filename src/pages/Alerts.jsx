@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { AlertTriangle, XCircle, Info, Zap, Loader2, RefreshCw, Train,
          MapPin, Clock, Cpu, ChevronRight, CheckCircle2, X, Users, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { simulateTrainStates } from '@/lib/trainSimulation';
+import { useRealTimeTrains } from '@/lib/useRealTimeTrains';
 import { base44 } from '@/api/base44Client';
 import { parseAISuggestionToNotifications, savePassengerNotifications } from '@/lib/passengerNotifications';
 
@@ -431,18 +431,19 @@ function AlertCard({ alert, onTrigger }) {
 
 // ─── Main Alerts Page ──────────────────────────────────────────────────────────
 export default function Alerts() {
+  const { trains, syncStatus } = useRealTimeTrains();
   const [alerts, setAlerts]         = useState([]);
   const [generating, setGenerating] = useState(false);
   const [severity, setSeverity]     = useState('all');
   const [initialized, setInitialized] = useState(false);
-  const [activeAlert, setActiveAlert] = useState(null); // alert shown in panel
+  const [activeAlert, setActiveAlert] = useState(null);
 
-  const generateAIAlerts = async () => {
+  const generateAIAlerts = async (currentTrains = trains) => {
+    if (!currentTrains || currentTrains.length === 0) return;
     setGenerating(true);
-    const trains = simulateTrainStates(Date.now() % 1000);
-    const delayed   = trains.filter(t => t.status === 'delayed');
-    const highOcc   = trains.filter(t => t.capacity > 0 && (t.passenger_count / t.capacity) > 0.85);
-    const highSpeed = trains.filter(t => t.speed_kmh > 180);
+    const delayed   = currentTrains.filter(t => t.status === 'delayed');
+    const highOcc   = currentTrains.filter(t => t.capacity > 0 && (t.passenger_count / t.capacity) > 0.85);
+    const highSpeed = currentTrains.filter(t => t.speed_kmh > 180);
 
     const generated = [];
 
@@ -497,8 +498,8 @@ export default function Alerts() {
       generated.push({
         severity: 'info', type: 'maintenance',
         title: 'Scheduled Maintenance Window',
-        description: `Preventive track inspection scheduled for ${trains[0]?.current_station || 'Grand Central'} sector 3 during 02:00–04:00. Signal system checks included.`,
-        train_number: null, station: trains[0]?.current_station || 'Grand Central',
+        description: `Preventive track inspection scheduled for ${currentTrains[0]?.current_station || 'Grand Central'} sector 3 during 02:00–04:00. Signal system checks included.`,
+        train_number: null, station: currentTrains[0]?.current_station || 'Grand Central',
         ai_suggestion: 'Reroute overnight freight services via alternate corridor. Deploy maintenance crew at 01:45.',
         impact: 'Minimal passenger impact — off-peak window',
         resolved: false,
@@ -529,7 +530,11 @@ export default function Alerts() {
     setInitialized(true);
   };
 
-  useEffect(() => { generateAIAlerts(); }, []);
+  useEffect(() => { 
+    if (trains.length > 0 && !initialized) {
+      generateAIAlerts(trains); 
+    }
+  }, [trains, initialized]);
 
   const filtered = alerts.filter(a => severity === 'all' || a.severity === severity);
   const critical = alerts.filter(a => a.severity === 'critical').length;
@@ -561,11 +566,11 @@ export default function Alerts() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={generateAIAlerts} disabled={generating}
+          <button onClick={() => generateAIAlerts(trains)} disabled={generating || trains.length === 0}
             className="p-2 rounded-lg border border-border hover:bg-secondary transition-all disabled:opacity-50">
             <RefreshCw className={`w-4 h-4 text-muted-foreground ${generating ? 'animate-spin' : ''}`} />
           </button>
-          <Button onClick={generateAIAlerts} disabled={generating} className="bg-blue-500 hover:bg-blue-600 text-white font-medium gap-2">
+          <Button onClick={() => generateAIAlerts(trains)} disabled={generating || trains.length === 0} className="bg-blue-500 hover:bg-blue-600 text-white font-medium gap-2">
             {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" fill="currentColor" />}
             Generate AI Alerts
           </Button>

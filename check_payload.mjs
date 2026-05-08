@@ -15,6 +15,7 @@ if (trains[0]) {
   console.log('  next_latitude:', t.next_latitude);
   console.log('  next_longitude:', t.next_longitude);
   console.log('  speed_kmh:', t.speed_kmh);
+  console.log('  route:', JSON.stringify(t.route));
   console.log('  feed_timestamp:', t.feed_timestamp);
   console.log('  arrival_at_next:', t.arrival_at_next);
   console.log('  is_dwelling:', t.is_dwelling);
